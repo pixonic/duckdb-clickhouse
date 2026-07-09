@@ -1,0 +1,35 @@
+# name: test/sql/clickhouse_catalog.test
+# description: test clickhouse catalog observability
+# group: [sql]
+
+require clickhouse_scanner
+
+# The connection string should be adjusted if needed to match the environment
+# We assume ClickHouse is running on localhost:9000
+statement ok
+ATTACH 'host=localhost port=9000 database=test_db' AS ch (TYPE clickhouse_scanner);
+
+# Check all databases
+query I
+SHOW DATABASES;
+----
+ch
+memory
+
+# Check all tables
+query IIIIII
+SHOW ALL TABLES;
+----
+ch	test_db	t1	[id, name, value, created_at]	[UBIGINT, VARCHAR, DOUBLE, DATE]	false
+
+
+statement ok
+USE ch;
+
+query IIIIII
+DESCRIBE t1;
+----
+id			UBIGINT	YES	NULL	NULL	NULL
+name		VARCHAR	YES	NULL	NULL	NULL
+value		DOUBLE	YES	NULL	NULL	NULL
+created_at	DATE	YES	NULL	NULL	NULL
