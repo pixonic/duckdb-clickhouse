@@ -15,6 +15,7 @@ struct ClickhouseScanBindData : public FunctionData {
 	}
 
 	ClickhouseTableEntry &table;
+	
 	vector<string> column_names;
 	vector<LogicalType> column_types;
 

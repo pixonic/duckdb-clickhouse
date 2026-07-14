@@ -5,6 +5,9 @@
 #include "duckdb/main/attached_database.hpp"
 #include "duckdb/common/limits.hpp"
 
+#include "duckdb/common/printer.hpp"
+
+
 // Forward declarations to avoid circular includes
 namespace duckdb {
 class ClickhouseTableEntry;
@@ -150,9 +153,6 @@ bool ClickhouseScanFunction::GetNextBlock(ClientContext &context, ClickhouseScan
 		local_state.block_offset = 0;
 		local_state.batch_index = ++global_state.batch_index;
 
-		// Create auxiliary data to keep the block alive
-		// local_state.aux_data = make_shared_ptr<ClickhouseAuxiliaryData>(std::move(block));
-
 		return true;
 	}
 
@@ -201,9 +201,8 @@ void ClickhouseScanFunction::Scan(ClientContext &context, TableFunctionInput &da
 		column_ids.push_back(i);
 		column_types.push_back(output.data[i].GetType());
 	}
-
-	ClickhouseConversion::BlockToDuckDB(lstate.current_block.value(), output, lstate.block_offset, output_size, column_ids,
-	                                    bind_data.column_types);
+	
+	ClickhouseConversion::BlockToDuckDB(lstate.current_block.value(), output, lstate.block_offset, output_size, column_ids, column_types);
 
 	lstate.block_offset += output_size;
 }

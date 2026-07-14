@@ -10,6 +10,9 @@
 #include <clickhouse/columns/date.h>
 #include <clickhouse/columns/nullable.h>
 
+#include "duckdb/common/printer.hpp"
+
+
 namespace duckdb {
 
 void ClickhouseConversion::ConvertValidity(clickhouse::ColumnRef ch_column, Vector &output, idx_t offset,
@@ -21,67 +24,88 @@ void ClickhouseConversion::ConvertValidity(clickhouse::ColumnRef ch_column, Vect
 	}
 
 	auto &validity = FlatVector::Validity(output);
-	validity.EnsureWritable();
+	auto nulls = nullable->Nulls()->As<clickhouse::ColumnUInt8>();
+	if (!nulls) {
+		throw InternalException("Unexpected ClickHouse null-map column type");
+	}
+	auto &null_data = nulls->GetWritableData();
+	D_ASSERT(offset + count <= null_data.size());
 
 	for (idx_t i = 0; i < count; i++) {
-		if (nullable->IsNull(offset + i)) {
-			validity.SetInvalid(i);
-		}
+		auto is_valid = null_data[offset + i] == 0;
+		validity.Set(i, is_valid);		
 	}
 }
 
 template <typename CH_TYPE, typename DUCK_TYPE>
-static void ConvertNumericColumnTemplated(clickhouse::ColumnRef ch_column, Vector &output, idx_t offset, idx_t count) {
+static void CopyNumericColumnTemplated(clickhouse::ColumnRef ch_column, Vector &output, idx_t offset, idx_t count) {
 	auto ch_typed = ch_column->As<clickhouse::ColumnVector<CH_TYPE>>();
 	auto duck_data = FlatVector::GetData<DUCK_TYPE>(output);
 
-	// Direct memory copy for compatible types
 	for (idx_t i = 0; i < count; i++) {
 		duck_data[i] = static_cast<DUCK_TYPE>((*ch_typed)[offset + i]);
 	}
+}
+
+template <typename NUMERIC_TYPE>
+static void ReferenceNumericColumnTemplated(clickhouse::ColumnRef ch_column, Vector &output, idx_t offset,
+                                            idx_t count) {
+	auto ch_typed = ch_column->As<clickhouse::ColumnVector<NUMERIC_TYPE>>();
+	if (!ch_typed) {
+		throw InternalException("Unexpected ClickHouse column type for zero-copy numeric conversion");
+	}
+
+	auto &ch_data = ch_typed->GetWritableData();
+	D_ASSERT(offset + count <= ch_data.size());
+	if (output.GetBuffer()) {
+		output.GetBuffer()->SetAuxiliaryData(make_uniq<ClickhouseAuxiliaryData>(ch_typed));
+	}
+	FlatVector::SetData(output, reinterpret_cast<data_ptr_t>(ch_data.data() + offset));
 }
 
 void ClickhouseConversion::ConvertNumericColumn(clickhouse::ColumnRef ch_column, Vector &output, idx_t offset,
                                                 idx_t count, const LogicalType &type) {
 	// Handle nullable wrapper
 	auto *nullable = dynamic_cast<clickhouse::ColumnNullable *>(ch_column.get());
+	auto nullable_column = ch_column;
 	if (nullable) {
 		ch_column = nullable->Nested();
 	}
 
 	switch (type.id()) {
 	case LogicalTypeId::BOOLEAN:
-		ConvertNumericColumnTemplated<uint8_t, bool>(ch_column, output, offset, count);
+		// ClickHouse represents Bool as UInt8, which cannot safely be exposed as a C++ bool array.
+		CopyNumericColumnTemplated<uint8_t, bool>(ch_column, output, offset, count);
 		break;
 	case LogicalTypeId::TINYINT:
-		ConvertNumericColumnTemplated<int8_t, int8_t>(ch_column, output, offset, count);
+		ReferenceNumericColumnTemplated<int8_t>(ch_column, output, offset, count);
 		break;
 	case LogicalTypeId::UTINYINT:
-		ConvertNumericColumnTemplated<uint8_t, uint8_t>(ch_column, output, offset, count);
+		ReferenceNumericColumnTemplated<uint8_t>(ch_column, output, offset, count);
 		break;
 	case LogicalTypeId::SMALLINT:
-		ConvertNumericColumnTemplated<int16_t, int16_t>(ch_column, output, offset, count);
+		ReferenceNumericColumnTemplated<int16_t>(ch_column, output, offset, count);
 		break;
 	case LogicalTypeId::USMALLINT:
-		ConvertNumericColumnTemplated<uint16_t, uint16_t>(ch_column, output, offset, count);
+		ReferenceNumericColumnTemplated<uint16_t>(ch_column, output, offset, count);
 		break;
 	case LogicalTypeId::INTEGER:
-		ConvertNumericColumnTemplated<int32_t, int32_t>(ch_column, output, offset, count);
+		ReferenceNumericColumnTemplated<int32_t>(ch_column, output, offset, count);
 		break;
 	case LogicalTypeId::UINTEGER:
-		ConvertNumericColumnTemplated<uint32_t, uint32_t>(ch_column, output, offset, count);
+		ReferenceNumericColumnTemplated<uint32_t>(ch_column, output, offset, count);
 		break;
 	case LogicalTypeId::BIGINT:
-		ConvertNumericColumnTemplated<int64_t, int64_t>(ch_column, output, offset, count);
+		ReferenceNumericColumnTemplated<int64_t>(ch_column, output, offset, count);
 		break;
 	case LogicalTypeId::UBIGINT:
-		ConvertNumericColumnTemplated<uint64_t, uint64_t>(ch_column, output, offset, count);
+		ReferenceNumericColumnTemplated<uint64_t>(ch_column, output, offset, count);
 		break;
 	case LogicalTypeId::FLOAT:
-		ConvertNumericColumnTemplated<float, float>(ch_column, output, offset, count);
+		ReferenceNumericColumnTemplated<float>(ch_column, output, offset, count);
 		break;
 	case LogicalTypeId::DOUBLE:
-		ConvertNumericColumnTemplated<double, double>(ch_column, output, offset, count);
+		ReferenceNumericColumnTemplated<double>(ch_column, output, offset, count);
 		break;
 	default:
 		throw NotImplementedException("Unsupported numeric type for conversion");
@@ -89,8 +113,7 @@ void ClickhouseConversion::ConvertNumericColumn(clickhouse::ColumnRef ch_column,
 
 	// Handle nullability after data conversion
 	if (nullable) {
-		ConvertValidity(dynamic_cast<clickhouse::ColumnNullable *>(ch_column.get())->shared_from_this(), output,
-		                offset, count);
+		ConvertValidity(nullable_column, output, offset, count);
 	}
 }
 
@@ -170,16 +193,16 @@ void ClickhouseConversion::BlockToDuckDB(clickhouse::Block &block, DataChunk &ou
 	for (idx_t output_idx = 0; output_idx < column_ids.size(); output_idx++) {
 		auto col_idx = column_ids[output_idx];
 
-		// Handle row_id column
-		if (col_idx == COLUMN_IDENTIFIER_ROW_ID) {
-			auto &vec = output.data[output_idx];
-			vec.SetVectorType(VectorType::FLAT_VECTOR);
-			auto data = FlatVector::GetData<row_t>(vec);
-			for (idx_t i = 0; i < count; i++) {
-				data[i] = static_cast<row_t>(block_offset + i);
-			}
-			continue;
-		}
+		// // Handle row_id column
+		// if (col_idx == COLUMN_IDENTIFIER_ROW_ID) {
+		// 	auto &vec = output.data[output_idx];y
+		// 	vec.SetVectorType(VectorType::FLAT_VECTOR);
+		// 	auto data = FlatVector::GetData<row_t>(vec);
+		// 	for (idx_t i = 0; i < count; i++) {
+		// 		data[i] = static_cast<row_t>(block_offset + i);
+		// 	}
+		// 	continue;
+		// }
 
 		// Get ClickHouse column
 		auto ch_column = block[col_idx];
@@ -188,7 +211,7 @@ void ClickhouseConversion::BlockToDuckDB(clickhouse::Block &block, DataChunk &ou
 
 		// Get the DuckDB type for this column
 		const auto &duck_type = column_types[col_idx];
-
+		
 		// Convert based on type
 		switch (duck_type.id()) {
 		case LogicalTypeId::BOOLEAN:
