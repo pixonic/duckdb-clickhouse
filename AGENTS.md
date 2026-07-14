@@ -1,3 +1,4 @@
+
 # Agent Guidelines for DuckDB ClickHouse Extension
 
 This document provides comprehensive guidelines for AI coding agents working on the DuckDB ClickHouse Scanner extension.
