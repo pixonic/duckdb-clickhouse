@@ -31,10 +31,10 @@ LogicalType ClickhouseTypes::TypeToLogicalType(const ClickhouseTypeData &input) 
 		return LogicalType::DOUBLE;
 	} else if (StringUtil::Contains(name, "String") || StringUtil::Contains(name, "FixedString")) {
 		return LogicalType::VARCHAR;
-	} else if (StringUtil::Contains(name, "Date")) {
-		return LogicalType::DATE;
 	} else if (StringUtil::Contains(name, "DateTime")) {
 		return LogicalType::TIMESTAMP;
+	} else if (StringUtil::Contains(name, "Date")) {
+		return LogicalType::DATE;
 	} else {
 		throw InternalException("Unsupported Clickhouse type: " + name);
 	}

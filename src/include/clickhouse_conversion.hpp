@@ -24,8 +24,7 @@ struct ClickhouseAuxiliaryData : public VectorAuxiliaryData {
 
 class ClickhouseConversion {
 public:
-	static void BlockToDuckDB(clickhouse::Block &block, DataChunk &output, idx_t block_offset, idx_t count,
-	                          const vector<column_t> &column_ids, const vector<LogicalType> &column_types);
+	static void BlockToDuckDB(clickhouse::Block &block, DataChunk &output, idx_t block_offset, idx_t count);
 
 private:
 	// Type-specific conversion functions
@@ -38,7 +37,7 @@ private:
 
 	static void ConvertDateTimeColumn(clickhouse::ColumnRef ch_column, Vector &output, idx_t offset, idx_t count);
 
-	static void ConvertValidity(clickhouse::ColumnRef ch_column, Vector &output, idx_t offset, idx_t count);
+	static void ConvertValidity(clickhouse::ColumnNullable* nullable, Vector &output, idx_t offset, idx_t count);
 };
 
 } // namespace duckdb

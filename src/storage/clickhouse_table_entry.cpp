@@ -31,5 +31,5 @@ TableStorageInfo ClickhouseTableEntry::GetStorageInfo(ClientContext &context) {
 void ClickhouseTableEntry::BindUpdateConstraints(Binder &binder, LogicalGet &get, LogicalProjection &proj,
                                                  LogicalUpdate &update, ClientContext &context) {
 }
-
+ 
 } // namespace duckdb

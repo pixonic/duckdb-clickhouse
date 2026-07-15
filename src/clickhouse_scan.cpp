@@ -77,12 +77,8 @@ unique_ptr<GlobalTableFunctionState> ClickhouseScanFunction::InitGlobal(ClientCo
 			select += ", ";
 		}
 		auto col_idx = input.column_ids[i];
-		if (col_idx == COLUMN_IDENTIFIER_ROW_ID) {
-			select += "NULL";
-		} else {
-			auto &col = table.GetColumn(LogicalIndex(col_idx));
-			select += ClickhouseUtils::WriteIdentifier(col.GetName());
-		}
+		auto &col = table.GetColumn(LogicalIndex(col_idx));
+		select += ClickhouseUtils::WriteIdentifier(col.GetName());
 	}
 
 	select += " FROM ";
@@ -191,18 +187,8 @@ void ClickhouseScanFunction::Scan(ClientContext &context, TableFunctionInput &da
 	// Calculate how many rows to output this iteration
 	idx_t remaining_rows = total_rows - lstate.block_offset;
 	idx_t output_size = MinValue<idx_t>(STANDARD_VECTOR_SIZE, remaining_rows);
-
-	// Convert ClickHouse block to DuckDB vectors
-	vector<column_t> column_ids;
-	vector<LogicalType> column_types;
-
-	// Build column mappings
-	for (idx_t i = 0; i < output.ColumnCount(); i++) {
-		column_ids.push_back(i);
-		column_types.push_back(output.data[i].GetType());
-	}
 	
-	ClickhouseConversion::BlockToDuckDB(lstate.current_block.value(), output, lstate.block_offset, output_size, column_ids, column_types);
+	ClickhouseConversion::BlockToDuckDB(lstate.current_block.value(), output, lstate.block_offset, output_size);
 
 	lstate.block_offset += output_size;
 }
