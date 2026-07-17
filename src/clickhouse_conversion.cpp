@@ -95,14 +95,17 @@ void ClickhouseConversion::ConvertNumericColumn(clickhouse::ColumnRef ch_column,
 	}
 }
 
-void ClickhouseConversion::ConvertStringColumn(clickhouse::ColumnRef ch_column, Vector &output, idx_t offset,
-                                               idx_t count) {
+void ClickhouseConversion::ConvertStringColumn(clickhouse::ColumnRef ch_column, Vector &output, idx_t offset, idx_t count) {
 	auto ch_string_col = ch_column->As<clickhouse::ColumnString>();
 	auto result_data = FlatVector::GetData<string_t>(output);
 
+	if (output.GetBuffer()) {
+		output.GetBuffer()->SetAuxiliaryData(make_uniq<ClickhouseAuxiliaryData>(ch_string_col));
+	}
+
 	for (idx_t i = 0; i < count; i++) {
 		auto ch_str = ch_string_col->At(offset + i);
-		result_data[i] = StringVector::AddString(output, ch_str.data(), ch_str.size());
+		result_data[i] = string_t(ch_str.data(), UnsafeNumericCast<uint32_t>(ch_str.size()));
 	}
 }
 
