@@ -80,16 +80,11 @@ LOAD 'build/release/extension/clickhouse_scanner/clickhouse_scanner.duckdb_exten
 
 ## Testing
 
-Tests can be run with the following command:
+Most tests require a ClickHouse server running. Initialize the test database and run the debug tests with:
 
 ```bash
-make test
-```
-
-Note that most tests require a ClickHouse server running. You can initialize the test database using the provided setup script:
-
-```bash
-clickhouse-client < scripts/setup_clickhouse.sql
+clickhouse client --queries-file scripts/setup_clickhouse.sql
+GEN=ninja make test_debug
 ```
 
 ## License

@@ -13,13 +13,13 @@ unique_ptr<BaseStatistics> ClickhouseTableEntry::GetStatistics(ClientContext &co
 
 TableFunction ClickhouseTableEntry::GetScanFunction(ClientContext &context, unique_ptr<FunctionData> &bind_data) {
 	auto scan_bind_data = make_uniq<ClickhouseScanBindData>(*this);
-	
+
 	for (auto &col : GetColumns().Logical()) {
 		scan_bind_data->column_names.push_back(col.GetName());
 		scan_bind_data->column_types.push_back(col.GetType());
 	}
 	bind_data = std::move(scan_bind_data);
-	
+
 	return ClickhouseScanFunction();
 }
 
@@ -31,5 +31,5 @@ TableStorageInfo ClickhouseTableEntry::GetStorageInfo(ClientContext &context) {
 void ClickhouseTableEntry::BindUpdateConstraints(Binder &binder, LogicalGet &get, LogicalProjection &proj,
                                                  LogicalUpdate &update, ClientContext &context) {
 }
- 
+
 } // namespace duckdb

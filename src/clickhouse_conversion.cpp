@@ -12,7 +12,7 @@
 
 namespace duckdb {
 
-void ConvertValidity(clickhouse::ColumnNullable* nullable, Vector &output, idx_t offset, idx_t count) {
+void ConvertValidity(clickhouse::ColumnNullable *nullable, Vector &output, idx_t offset, idx_t count) {
 	auto &validity = FlatVector::Validity(output);
 	auto nulls = nullable->Nulls()->As<clickhouse::ColumnUInt8>();
 	if (!nulls) {
@@ -23,7 +23,7 @@ void ConvertValidity(clickhouse::ColumnNullable* nullable, Vector &output, idx_t
 
 	for (idx_t i = 0; i < count; i++) {
 		auto is_valid = null_data[offset + i] == 0;
-		validity.Set(i, is_valid);		
+		validity.Set(i, is_valid);
 	}
 }
 
@@ -42,8 +42,8 @@ void ConvertDirect(clickhouse::ColumnRef ch_column, Vector &output, idx_t offset
 	FlatVector::SetData(output, reinterpret_cast<data_ptr_t>(ch_data.data() + offset));
 }
 
-void ConvertString(clickhouse::ColumnRef ch_column, Vector &output, idx_t offset, idx_t count) {
-	auto ch_string_col = ch_column->As<clickhouse::ColumnString>();
+template <typename COLUMN_TYPE>
+void ConvertStringColumn(const std::shared_ptr<COLUMN_TYPE> &ch_string_col, Vector &output, idx_t offset, idx_t count) {
 	auto result_data = FlatVector::GetData<string_t>(output);
 
 	if (output.GetBuffer()) {
@@ -56,13 +56,29 @@ void ConvertString(clickhouse::ColumnRef ch_column, Vector &output, idx_t offset
 	}
 }
 
+void ConvertString(clickhouse::ColumnRef ch_column, Vector &output, idx_t offset, idx_t count) {
+	auto ch_string_col = ch_column->As<clickhouse::ColumnString>();
+	if (ch_string_col) {
+		ConvertStringColumn(ch_string_col, output, offset, count);
+		return;
+	}
+
+	auto ch_fixed_string_col = ch_column->As<clickhouse::ColumnFixedString>();
+	if (ch_fixed_string_col) {
+		ConvertStringColumn(ch_fixed_string_col, output, offset, count);
+		return;
+	}
+
+	throw InternalException("Unexpected ClickHouse string column type");
+}
+
 void ConvertDate(clickhouse::ColumnRef ch_column, Vector &output, idx_t offset, idx_t count) {
 	auto ch_date = ch_column->As<clickhouse::ColumnDate>();
 	auto result_data = FlatVector::GetData<date_t>(output);
 
 	for (idx_t i = 0; i < count; i++) {
-		// ClickHouse Date is days since Unix epoch (same as DuckDB!)
-		auto days = ch_date->At(offset + i);
+		// ClickHouse Date is stored as days since Unix epoch (same as DuckDB).
+		auto days = ch_date->RawAt(offset + i);
 		result_data[i] = date_t(UnsafeNumericCast<int32_t>(days));
 	}
 }

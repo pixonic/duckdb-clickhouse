@@ -7,7 +7,6 @@
 
 #include "duckdb/common/printer.hpp"
 
-
 // Forward declarations to avoid circular includes
 namespace duckdb {
 class ClickhouseTableEntry;
@@ -187,7 +186,7 @@ void ClickhouseScanFunction::Scan(ClientContext &context, TableFunctionInput &da
 	// Calculate how many rows to output this iteration
 	idx_t remaining_rows = total_rows - lstate.block_offset;
 	idx_t output_size = MinValue<idx_t>(STANDARD_VECTOR_SIZE, remaining_rows);
-	
+
 	ClickhouseConversion::BlockToDuckDB(lstate.current_block.value(), output, lstate.block_offset, output_size);
 
 	lstate.block_offset += output_size;
@@ -198,7 +197,8 @@ void ClickhouseScanFunction::Scan(ClientContext &context, TableFunctionInput &da
 //===--------------------------------------------------------------------===//
 
 ClickhouseScanFunction::ClickhouseScanFunction()
-    : TableFunction("clickhouse_scan", {LogicalType::VARCHAR, LogicalType::VARCHAR, LogicalType::VARCHAR}, Scan, Bind, InitGlobal, InitLocal) {
+    : TableFunction("clickhouse_scan", {LogicalType::VARCHAR, LogicalType::VARCHAR, LogicalType::VARCHAR}, Scan, Bind,
+                    InitGlobal, InitLocal) {
 	projection_pushdown = true;
 	filter_pushdown = true;
 }

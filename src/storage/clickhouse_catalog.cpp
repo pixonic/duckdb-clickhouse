@@ -31,7 +31,6 @@ void ClickhouseCatalog::ScanSchemas(ClientContext &context, std::function<void(S
 optional_ptr<SchemaCatalogEntry> ClickhouseCatalog::LookupSchema(CatalogTransaction transaction,
                                                                  const EntryLookupInfo &schema_lookup,
                                                                  OnEntryNotFound if_not_found) {
-
 	auto schema_name = schema_lookup.GetEntryName();
 	if (schema_name == DEFAULT_SCHEMA) {
 		std::string &default_schema = client_options.default_database;
