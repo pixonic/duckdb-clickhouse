@@ -25,19 +25,6 @@ struct ClickhouseAuxiliaryData : public VectorAuxiliaryData {
 class ClickhouseConversion {
 public:
 	static void BlockToDuckDB(clickhouse::Block &block, DataChunk &output, idx_t block_offset, idx_t count);
-
-private:
-	// Type-specific conversion functions
-	static void ConvertNumericColumn(clickhouse::ColumnRef ch_column, Vector &output, idx_t offset, idx_t count,
-	                                 const LogicalType &type);
-
-	static void ConvertStringColumn(clickhouse::ColumnRef ch_column, Vector &output, idx_t offset, idx_t count);
-
-	static void ConvertDateColumn(clickhouse::ColumnRef ch_column, Vector &output, idx_t offset, idx_t count);
-
-	static void ConvertDateTimeColumn(clickhouse::ColumnRef ch_column, Vector &output, idx_t offset, idx_t count);
-
-	static void ConvertValidity(clickhouse::ColumnNullable* nullable, Vector &output, idx_t offset, idx_t count);
 };
 
 } // namespace duckdb

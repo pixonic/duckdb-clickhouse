@@ -10,11 +10,9 @@
 #include <clickhouse/columns/date.h>
 #include <clickhouse/columns/nullable.h>
 
-#include "duckdb/common/printer.hpp"
-
 namespace duckdb {
 
-void ClickhouseConversion::ConvertValidity(clickhouse::ColumnNullable* nullable, Vector &output, idx_t offset, idx_t count) {
+void ConvertValidity(clickhouse::ColumnNullable* nullable, Vector &output, idx_t offset, idx_t count) {
 	auto &validity = FlatVector::Validity(output);
 	auto nulls = nullable->Nulls()->As<clickhouse::ColumnUInt8>();
 	if (!nulls) {
@@ -29,21 +27,11 @@ void ClickhouseConversion::ConvertValidity(clickhouse::ColumnNullable* nullable,
 	}
 }
 
-template <typename CH_TYPE, typename DUCK_TYPE>
-static void CopyNumericColumnTemplated(clickhouse::ColumnRef ch_column, Vector &output, idx_t offset, idx_t count) {
-	auto ch_typed = ch_column->As<clickhouse::ColumnVector<CH_TYPE>>();
-	auto duck_data = FlatVector::GetData<DUCK_TYPE>(output);
-
-	for (idx_t i = 0; i < count; i++) {
-		duck_data[i] = static_cast<DUCK_TYPE>((*ch_typed)[offset + i]);
-	}
-}
-
-template <typename NUMERIC_TYPE>
-static void ReferenceNumericColumnTemplated(clickhouse::ColumnRef ch_column, Vector &output, idx_t offset, idx_t count) {
-	auto ch_typed = ch_column->As<clickhouse::ColumnVector<NUMERIC_TYPE>>();
+template <typename TYPE>
+void ConvertDirect(clickhouse::ColumnRef ch_column, Vector &output, idx_t offset, idx_t count) {
+	auto ch_typed = ch_column->As<clickhouse::ColumnVector<TYPE>>();
 	if (!ch_typed) {
-		throw InternalException("Unexpected ClickHouse column type for zero-copy numeric conversion");
+		throw InternalException("Unexpected ClickHouse column type for zero-copy conversion");
 	}
 
 	auto &ch_data = ch_typed->GetWritableData();
@@ -54,48 +42,7 @@ static void ReferenceNumericColumnTemplated(clickhouse::ColumnRef ch_column, Vec
 	FlatVector::SetData(output, reinterpret_cast<data_ptr_t>(ch_data.data() + offset));
 }
 
-void ClickhouseConversion::ConvertNumericColumn(clickhouse::ColumnRef ch_column, Vector &output, idx_t offset, idx_t count, const LogicalType &type) {
-	switch (type.id()) {
-	case LogicalTypeId::BOOLEAN:
-		// ClickHouse represents Bool as UInt8, which cannot safely be exposed as a C++ bool array.
-		CopyNumericColumnTemplated<uint8_t, bool>(ch_column, output, offset, count);
-		break;
-	case LogicalTypeId::TINYINT:
-		ReferenceNumericColumnTemplated<int8_t>(ch_column, output, offset, count);
-		break;
-	case LogicalTypeId::UTINYINT:
-		ReferenceNumericColumnTemplated<uint8_t>(ch_column, output, offset, count);
-		break;
-	case LogicalTypeId::SMALLINT:
-		ReferenceNumericColumnTemplated<int16_t>(ch_column, output, offset, count);
-		break;
-	case LogicalTypeId::USMALLINT:
-		ReferenceNumericColumnTemplated<uint16_t>(ch_column, output, offset, count);
-		break;
-	case LogicalTypeId::INTEGER:
-		ReferenceNumericColumnTemplated<int32_t>(ch_column, output, offset, count);
-		break;
-	case LogicalTypeId::UINTEGER:
-		ReferenceNumericColumnTemplated<uint32_t>(ch_column, output, offset, count);
-		break;
-	case LogicalTypeId::BIGINT:
-		ReferenceNumericColumnTemplated<int64_t>(ch_column, output, offset, count);
-		break;
-	case LogicalTypeId::UBIGINT:
-		ReferenceNumericColumnTemplated<uint64_t>(ch_column, output, offset, count);
-		break;
-	case LogicalTypeId::FLOAT:
-		ReferenceNumericColumnTemplated<float>(ch_column, output, offset, count);
-		break;
-	case LogicalTypeId::DOUBLE:
-		ReferenceNumericColumnTemplated<double>(ch_column, output, offset, count);
-		break;
-	default:
-		throw NotImplementedException("Unsupported numeric type for conversion");
-	}
-}
-
-void ClickhouseConversion::ConvertStringColumn(clickhouse::ColumnRef ch_column, Vector &output, idx_t offset, idx_t count) {
+void ConvertString(clickhouse::ColumnRef ch_column, Vector &output, idx_t offset, idx_t count) {
 	auto ch_string_col = ch_column->As<clickhouse::ColumnString>();
 	auto result_data = FlatVector::GetData<string_t>(output);
 
@@ -109,20 +56,18 @@ void ClickhouseConversion::ConvertStringColumn(clickhouse::ColumnRef ch_column, 
 	}
 }
 
-void ClickhouseConversion::ConvertDateColumn(clickhouse::ColumnRef ch_column, Vector &output, idx_t offset,
-                                             idx_t count) {
+void ConvertDate(clickhouse::ColumnRef ch_column, Vector &output, idx_t offset, idx_t count) {
 	auto ch_date = ch_column->As<clickhouse::ColumnDate>();
 	auto result_data = FlatVector::GetData<date_t>(output);
 
 	for (idx_t i = 0; i < count; i++) {
 		// ClickHouse Date is days since Unix epoch (same as DuckDB!)
 		auto days = ch_date->At(offset + i);
-		result_data[i] = date_t(static_cast<int32_t>(days));
+		result_data[i] = date_t(UnsafeNumericCast<int32_t>(days));
 	}
 }
 
-void ClickhouseConversion::ConvertDateTimeColumn(clickhouse::ColumnRef ch_column, Vector &output, idx_t offset,
-                                                 idx_t count) {
+void ConvertTimestamp(clickhouse::ColumnRef ch_column, Vector &output, idx_t offset, idx_t count) {
 	auto ch_datetime = ch_column->As<clickhouse::ColumnDateTime>();
 	auto result_data = FlatVector::GetData<timestamp_t>(output);
 
@@ -130,7 +75,7 @@ void ClickhouseConversion::ConvertDateTimeColumn(clickhouse::ColumnRef ch_column
 		// ClickHouse DateTime = Unix timestamp (seconds since epoch)
 		// DuckDB TIMESTAMP = microseconds since epoch
 		auto unix_ts = ch_datetime->At(offset + i);
-		result_data[i] = Timestamp::FromEpochSeconds(static_cast<int64_t>(unix_ts));
+		result_data[i] = Timestamp::FromEpochSeconds(UnsafeNumericCast<int64_t>(unix_ts));
 	}
 }
 
@@ -154,26 +99,44 @@ void ClickhouseConversion::BlockToDuckDB(clickhouse::Block &block, DataChunk &ou
 		// Convert based on type
 		switch (type.id()) {
 		case LogicalTypeId::BOOLEAN:
-		case LogicalTypeId::TINYINT:
 		case LogicalTypeId::UTINYINT:
+			ConvertDirect<uint8_t>(nested_column, vector, block_offset, count);
+			break;
+		case LogicalTypeId::TINYINT:
+			ConvertDirect<int8_t>(nested_column, vector, block_offset, count);
+			break;
 		case LogicalTypeId::SMALLINT:
+			ConvertDirect<int16_t>(nested_column, vector, block_offset, count);
+			break;
 		case LogicalTypeId::USMALLINT:
+			ConvertDirect<uint16_t>(nested_column, vector, block_offset, count);
+			break;
 		case LogicalTypeId::INTEGER:
+			ConvertDirect<int32_t>(nested_column, vector, block_offset, count);
+			break;
 		case LogicalTypeId::UINTEGER:
+			ConvertDirect<uint32_t>(nested_column, vector, block_offset, count);
+			break;
 		case LogicalTypeId::BIGINT:
+			ConvertDirect<int64_t>(nested_column, vector, block_offset, count);
+			break;
 		case LogicalTypeId::UBIGINT:
+			ConvertDirect<uint64_t>(nested_column, vector, block_offset, count);
+			break;
 		case LogicalTypeId::FLOAT:
+			ConvertDirect<float>(nested_column, vector, block_offset, count);
+			break;
 		case LogicalTypeId::DOUBLE:
-			ConvertNumericColumn(nested_column, vector, block_offset, count, type);
+			ConvertDirect<double>(nested_column, vector, block_offset, count);
 			break;
 		case LogicalTypeId::VARCHAR:
-			ConvertStringColumn(nested_column, vector, block_offset, count);
+			ConvertString(nested_column, vector, block_offset, count);
 			break;
 		case LogicalTypeId::DATE:
-			ConvertDateColumn(nested_column, vector, block_offset, count);
+			ConvertDate(nested_column, vector, block_offset, count);
 			break;
 		case LogicalTypeId::TIMESTAMP:
-			ConvertDateTimeColumn(nested_column, vector, block_offset, count);
+			ConvertTimestamp(nested_column, vector, block_offset, count);
 			break;
 		default:
 			throw NotImplementedException("Unsupported type for ClickHouse conversion: " + type.ToString());
