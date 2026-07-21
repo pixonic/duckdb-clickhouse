@@ -124,7 +124,7 @@ void ConvertLowCardinality(const std::shared_ptr<clickhouse::ColumnLowCardinalit
 	auto dictionary_size = UnsafeNumericCast<idx_t>(low_cardinality->GetDictionarySize());
 	auto dictionary_column = low_cardinality->GetDictionaryColumn();
 	auto dictionary_values = dictionary_column;
-	
+
 	auto *nullable_dictionary = dynamic_cast<clickhouse::ColumnNullable *>(dictionary_column.get());
 	if (nullable_dictionary) {
 		dictionary_values = nullable_dictionary->Nested();
@@ -160,7 +160,7 @@ void ColumnToDuckDB(clickhouse::ColumnRef ch_column, Vector &vector, idx_t offse
 	if (low_cardinality) {
 		if (vector.GetType().id() != LogicalTypeId::VARCHAR) {
 			throw NotImplementedException("Unsupported ClickHouse LowCardinality type: " +
-											low_cardinality->Type()->GetName());
+			                              low_cardinality->Type()->GetName());
 		}
 		ConvertLowCardinality(low_cardinality, vector, offset, count);
 		return;
@@ -219,7 +219,7 @@ void ColumnToDuckDB(clickhouse::ColumnRef ch_column, Vector &vector, idx_t offse
 		break;
 	default:
 		throw NotImplementedException("Unsupported type for ClickHouse conversion: " + type.ToString());
-	}	
+	}
 }
 
 void ClickhouseConversion::BlockToDuckDB(clickhouse::Block &block, DataChunk &output, idx_t block_offset, idx_t count) {

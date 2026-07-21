@@ -188,9 +188,9 @@ void ClickhouseScanFunction::Scan(ClientContext &context, TableFunctionInput &da
 	idx_t output_size = MinValue<idx_t>(STANDARD_VECTOR_SIZE, remaining_rows);
 
 	ClickhouseConversion::BlockToDuckDB(lstate.current_block.value(), output, lstate.block_offset, output_size);
-	
+
 	output.Verify();
-	
+
 	lstate.block_offset += output_size;
 }
 
