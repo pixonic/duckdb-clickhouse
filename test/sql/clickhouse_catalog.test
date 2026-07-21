@@ -19,10 +19,14 @@ FROM duckdb_tables()
 WHERE database_name = 'ch'
 ORDER BY table_name;
 ----
+invalid_datetime64_values
+invalid_time_values
 low_cardinality_types
 nullable_types
 supported_types
 t1
+temporal_precision_types
+temporal_values
 vector_size
 
 # Verify every supported ClickHouse type is exposed as the intended DuckDB type.
@@ -47,6 +51,48 @@ string_value	VARCHAR	false
 fixed_string_value	VARCHAR	false
 date_value	DATE	false
 datetime_value	TIMESTAMP	false
+
+# DateTime64 and Time64 precision determines the exposed DuckDB unit.
+query II
+SELECT column_name, data_type
+FROM duckdb_columns()
+WHERE database_name = 'ch' AND table_name = 'temporal_precision_types'
+ORDER BY column_index;
+----
+datetime64_0	TIMESTAMP_S
+datetime64_1	TIMESTAMP_MS
+datetime64_2	TIMESTAMP_MS
+datetime64_3	TIMESTAMP_MS
+datetime64_4	TIMESTAMP
+datetime64_5	TIMESTAMP
+datetime64_6	TIMESTAMP
+datetime64_7	TIMESTAMP_NS
+datetime64_8	TIMESTAMP_NS
+datetime64_9	TIMESTAMP_NS
+time_value	TIME
+time64_0	TIME
+time64_1	TIME
+time64_2	TIME
+time64_3	TIME
+time64_4	TIME
+time64_5	TIME
+time64_6	TIME
+time64_7	TIME_NS
+time64_8	TIME_NS
+time64_9	TIME_NS
+
+# Temporal mappings and nullability work through Nullable wrappers.
+query III
+SELECT column_name, data_type, is_nullable
+FROM duckdb_columns()
+WHERE database_name = 'ch' AND table_name = 'temporal_values'
+  AND column_name IN ('date32_value', 'nullable_date32', 'nullable_datetime64', 'nullable_time64')
+ORDER BY column_index;
+----
+date32_value	DATE	false
+nullable_date32	DATE	true
+nullable_datetime64	TIMESTAMP_NS	true
+nullable_time64	TIME_NS	true
 
 # Nullable ClickHouse columns must remain nullable in the DuckDB catalog.
 query III

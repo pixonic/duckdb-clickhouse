@@ -35,13 +35,13 @@ static void AddColumn(const ch::Block &block, idx_t row_idx, CreateTableInfo &in
 
 	int64_t datetime_precision = -1;
 
-	auto datetime_precision_col = block[5]->As<ch::ColumnNullable>();
+	auto datetime_precision_col = block[6]->As<ch::ColumnNullable>();
 	if (!datetime_precision_col->IsNull(row_idx)) {
 		datetime_precision =
 		    static_cast<int64_t>(datetime_precision_col->Nested()->As<ch::ColumnUInt64>()->At(row_idx));
 	}
 
-	ClickhouseTypeData type_data {std::move(raw_type), numeric_precision, numeric_scale};
+	ClickhouseTypeData type_data {std::move(raw_type), numeric_precision, numeric_scale, datetime_precision};
 
 	auto column_type = ClickhouseTypes::TypeToLogicalType(type_data);
 

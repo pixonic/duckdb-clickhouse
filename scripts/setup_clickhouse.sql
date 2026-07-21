@@ -1,4 +1,6 @@
 -- SQL code to initialize ClickHouse with test data
+SET enable_time_time64_type = 1;
+
 DROP DATABASE IF EXISTS test_db;
 CREATE DATABASE test_db;
 
@@ -90,6 +92,74 @@ SELECT
     concat('row-', toString(number)),
     if(number % 2 = 0, NULL, number)
 FROM numbers(4097);
+
+-- Every DateTime64 and Time64 precision is present so catalog precision
+-- bucketing is covered independently from value conversion tests.
+CREATE TABLE test_db.temporal_precision_types (
+    datetime64_0 DateTime64(0, 'UTC'),
+    datetime64_1 DateTime64(1, 'UTC'),
+    datetime64_2 DateTime64(2, 'UTC'),
+    datetime64_3 DateTime64(3, 'UTC'),
+    datetime64_4 DateTime64(4, 'UTC'),
+    datetime64_5 DateTime64(5, 'UTC'),
+    datetime64_6 DateTime64(6, 'UTC'),
+    datetime64_7 DateTime64(7, 'UTC'),
+    datetime64_8 DateTime64(8, 'UTC'),
+    datetime64_9 DateTime64(9, 'UTC'),
+    time_value Time,
+    time64_0 Time64(0),
+    time64_1 Time64(1),
+    time64_2 Time64(2),
+    time64_3 Time64(3),
+    time64_4 Time64(4),
+    time64_5 Time64(5),
+    time64_6 Time64(6),
+    time64_7 Time64(7),
+    time64_8 Time64(8),
+    time64_9 Time64(9)
+) ENGINE = MergeTree() ORDER BY tuple();
+
+CREATE TABLE test_db.temporal_values (
+    row_id UInt8,
+    date32_value Date32,
+    datetime64_s DateTime64(0, 'UTC'),
+    datetime64_ms DateTime64(3, 'UTC'),
+    datetime64_us DateTime64(6, 'UTC'),
+    datetime64_ns DateTime64(9, 'UTC'),
+    datetime64_tokyo DateTime64(3, 'Asia/Tokyo'),
+    time_value Time,
+    time64_us Time64(6),
+    time64_ns Time64(9),
+    nullable_date32 Nullable(Date32),
+    nullable_datetime64 Nullable(DateTime64(8, 'UTC')),
+    nullable_time64 Nullable(Time64(8))
+) ENGINE = MergeTree() ORDER BY row_id;
+
+INSERT INTO test_db.temporal_values VALUES
+    (1, '1960-01-02', '1969-12-31 23:59:59', '1969-12-31 23:59:58.765',
+     '1969-12-31 23:59:58.765432', '1969-12-31 23:59:58.765432110',
+     '1970-01-01 00:00:00.000', '00:00:00', '01:02:03.123456', '01:02:03.123456789', NULL, NULL, NULL),
+    (2, '2024-02-29', '2024-02-29 12:34:56', '2024-02-29 12:34:56.123',
+     '2024-02-29 12:34:56.123456', '2024-02-29 12:34:56.123456789',
+     '2024-02-29 12:34:56.789', '24:00:00', '12:34:56.654321', '23:59:59.999999999',
+     '2024-03-01', '2024-02-29 12:34:56.12345678', '12:34:56.12345678');
+
+CREATE TABLE test_db.invalid_time_values (
+    row_id UInt8,
+    time_value Time64(9)
+) ENGINE = MergeTree() ORDER BY row_id;
+
+INSERT INTO test_db.invalid_time_values VALUES
+    (1, '-01:00:00'),
+    (2, '25:00:00');
+
+CREATE TABLE test_db.invalid_datetime64_values (
+    datetime64_7 DateTime64(7, 'UTC'),
+    datetime64_8 DateTime64(8, 'UTC')
+) ENGINE = MergeTree() ORDER BY tuple();
+
+INSERT INTO test_db.invalid_datetime64_values VALUES
+    ('2299-12-31 23:59:59.1234567', '2299-12-31 23:59:59.12345678');
 
 -- More than 256 distinct strings exercise a multi-byte LowCardinality index,
 -- while 4097 rows also cross DuckDB standard-vector boundaries.

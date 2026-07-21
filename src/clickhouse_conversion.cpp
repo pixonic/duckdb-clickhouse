@@ -1,13 +1,18 @@
 #include "clickhouse_conversion.hpp"
+#include "duckdb/common/exception/conversion_exception.hpp"
 #include "duckdb/common/types/date.hpp"
+#include "duckdb/common/types/interval.hpp"
+#include "duckdb/common/types/time.hpp"
 #include "duckdb/common/types/timestamp.hpp"
 #include "duckdb/common/types/string_type.hpp"
+#include "duckdb/common/operator/multiply.hpp"
 #include "duckdb/common/vector_operations/vector_operations.hpp"
 
 #include <clickhouse/columns/column.h>
 #include <clickhouse/columns/numeric.h>
 #include <clickhouse/columns/string.h>
 #include <clickhouse/columns/date.h>
+#include <clickhouse/columns/time.h>
 #include <clickhouse/columns/nullable.h>
 #include <clickhouse/columns/lowcardinality.h>
 
@@ -78,23 +83,133 @@ void ConvertString(clickhouse::ColumnRef ch_column, Vector &output, idx_t offset
 void ConvertDate(clickhouse::ColumnRef ch_column, Vector &output, idx_t offset, idx_t count) {
 	auto ch_date = ch_column->As<clickhouse::ColumnDate>();
 	auto result_data = FlatVector::GetData<date_t>(output);
+	if (ch_date) {
+		for (idx_t i = 0; i < count; i++) {
+			// ClickHouse Date is stored as days since Unix epoch (same as DuckDB).
+			auto days = ch_date->RawAt(offset + i);
+			result_data[i] = date_t(UnsafeNumericCast<int32_t>(days));
+		}
+		return;
+	}
+
+	auto ch_date32 = ch_column->As<clickhouse::ColumnDate32>();
+	if (ch_date32) {
+		for (idx_t i = 0; i < count; i++) {
+			// ClickHouse Date32 and DuckDB DATE both store signed days since Unix epoch.
+			result_data[i] = date_t(ch_date32->RawAt(offset + i));
+		}
+		return;
+	}
+
+	throw InternalException("Unexpected ClickHouse date column type");
+}
+
+static int64_t PowerOfTen(idx_t exponent) {
+	static constexpr int64_t POWERS_OF_TEN[] = {1,      10,      100,      1000,      10000,
+	                                            100000, 1000000, 10000000, 100000000, 1000000000};
+	D_ASSERT(exponent < sizeof(POWERS_OF_TEN) / sizeof(POWERS_OF_TEN[0]));
+	return POWERS_OF_TEN[exponent];
+}
+
+static int64_t ScaleTemporalTicks(int64_t value, idx_t source_precision, idx_t target_precision,
+                                  const string &source_type, const LogicalType &target_type) {
+	if (source_precision > target_precision) {
+		throw InternalException("Cannot exactly scale ClickHouse %s to DuckDB %s", source_type, target_type.ToString());
+	}
+
+	int64_t result;
+	auto multiplier = PowerOfTen(target_precision - source_precision);
+	if (!TryMultiplyOperator::Operation(value, multiplier, result) || !Timestamp::IsFinite(timestamp_t(result))) {
+		throw ConversionException(
+		    "Cannot exactly convert ClickHouse %s value %d to DuckDB %s: value is outside the supported range",
+		    source_type, value, target_type.ToString());
+	}
+	return result;
+}
+
+template <typename TARGET_TYPE>
+void ConvertDateTime64(const std::shared_ptr<clickhouse::ColumnDateTime64> &ch_datetime, Vector &output, idx_t offset,
+                       idx_t count, idx_t target_precision) {
+	auto result_data = FlatVector::GetData<TARGET_TYPE>(output);
+	auto source_precision = ch_datetime->GetPrecision();
+	auto source_type = ch_datetime->Type()->GetName();
 
 	for (idx_t i = 0; i < count; i++) {
-		// ClickHouse Date is stored as days since Unix epoch (same as DuckDB).
-		auto days = ch_date->RawAt(offset + i);
-		result_data[i] = date_t(UnsafeNumericCast<int32_t>(days));
+		auto ticks = ch_datetime->At(offset + i);
+		auto scaled_ticks =
+		    ScaleTemporalTicks(ticks, source_precision, target_precision, source_type, output.GetType());
+		result_data[i] = TARGET_TYPE(scaled_ticks);
 	}
 }
 
 void ConvertTimestamp(clickhouse::ColumnRef ch_column, Vector &output, idx_t offset, idx_t count) {
 	auto ch_datetime = ch_column->As<clickhouse::ColumnDateTime>();
-	auto result_data = FlatVector::GetData<timestamp_t>(output);
+	if (ch_datetime) {
+		if (output.GetType().id() != LogicalTypeId::TIMESTAMP) {
+			throw InternalException("Unexpected DuckDB type for ClickHouse DateTime conversion: " +
+			                        output.GetType().ToString());
+		}
+		auto result_data = FlatVector::GetData<timestamp_t>(output);
+		for (idx_t i = 0; i < count; i++) {
+			// ClickHouse DateTime = Unix timestamp (seconds since epoch)
+			// DuckDB TIMESTAMP = microseconds since epoch
+			auto unix_ts = ch_datetime->At(offset + i);
+			result_data[i] = Timestamp::FromEpochSeconds(UnsafeNumericCast<int64_t>(unix_ts));
+		}
+		return;
+	}
 
+	auto ch_datetime64 = ch_column->As<clickhouse::ColumnDateTime64>();
+	if (!ch_datetime64) {
+		throw InternalException("Unexpected ClickHouse timestamp column type");
+	}
+
+	switch (output.GetType().id()) {
+	case LogicalTypeId::TIMESTAMP_SEC:
+		ConvertDateTime64<timestamp_sec_t>(ch_datetime64, output, offset, count, 0);
+		break;
+	case LogicalTypeId::TIMESTAMP_MS:
+		ConvertDateTime64<timestamp_ms_t>(ch_datetime64, output, offset, count, 3);
+		break;
+	case LogicalTypeId::TIMESTAMP:
+		ConvertDateTime64<timestamp_t>(ch_datetime64, output, offset, count, 6);
+		break;
+	case LogicalTypeId::TIMESTAMP_NS:
+		ConvertDateTime64<timestamp_ns_t>(ch_datetime64, output, offset, count, 9);
+		break;
+	default:
+		throw InternalException("Unexpected DuckDB timestamp type: " + output.GetType().ToString());
+	}
+}
+
+template <typename TARGET_TYPE>
+void ConvertTime(clickhouse::ColumnRef ch_column, Vector &output, idx_t offset, idx_t count, idx_t target_precision) {
+	idx_t source_precision;
+	string source_type;
+	auto ch_time = ch_column->As<clickhouse::ColumnTime>();
+	auto ch_time64 = ch_column->As<clickhouse::ColumnTime64>();
+	if (ch_time) {
+		source_precision = 0;
+		source_type = ch_time->Type()->GetName();
+	} else if (ch_time64) {
+		source_precision = ch_time64->GetPrecision();
+		source_type = ch_time64->Type()->GetName();
+	} else {
+		throw InternalException("Unexpected ClickHouse time column type");
+	}
+
+	auto max_source_ticks = Interval::SECS_PER_DAY * PowerOfTen(source_precision);
+	auto result_data = FlatVector::GetData<TARGET_TYPE>(output);
 	for (idx_t i = 0; i < count; i++) {
-		// ClickHouse DateTime = Unix timestamp (seconds since epoch)
-		// DuckDB TIMESTAMP = microseconds since epoch
-		auto unix_ts = ch_datetime->At(offset + i);
-		result_data[i] = Timestamp::FromEpochSeconds(UnsafeNumericCast<int64_t>(unix_ts));
+		int64_t source_ticks = ch_time ? ch_time->At(offset + i) : ch_time64->At(offset + i);
+		if (source_ticks < 0 || source_ticks > max_source_ticks) {
+			throw ConversionException(
+			    "Cannot convert ClickHouse %s value %d to DuckDB %s: time must be between 00:00:00 and 24:00:00",
+			    source_type, source_ticks, output.GetType().ToString());
+		}
+		auto scaled_ticks =
+		    ScaleTemporalTicks(source_ticks, source_precision, target_precision, source_type, output.GetType());
+		result_data[i] = TARGET_TYPE(scaled_ticks);
 	}
 }
 
@@ -215,7 +330,16 @@ void ColumnToDuckDB(clickhouse::ColumnRef ch_column, Vector &vector, idx_t offse
 		ConvertDate(nested_column, vector, offset, count);
 		break;
 	case LogicalTypeId::TIMESTAMP:
+	case LogicalTypeId::TIMESTAMP_SEC:
+	case LogicalTypeId::TIMESTAMP_MS:
+	case LogicalTypeId::TIMESTAMP_NS:
 		ConvertTimestamp(nested_column, vector, offset, count);
+		break;
+	case LogicalTypeId::TIME:
+		ConvertTime<dtime_t>(nested_column, vector, offset, count, 6);
+		break;
+	case LogicalTypeId::TIME_NS:
+		ConvertTime<dtime_ns_t>(nested_column, vector, offset, count, 9);
 		break;
 	default:
 		throw NotImplementedException("Unsupported type for ClickHouse conversion: " + type.ToString());

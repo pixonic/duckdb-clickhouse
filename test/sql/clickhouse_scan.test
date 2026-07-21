@@ -211,3 +211,138 @@ nullable-6	193
 nullable-7	193
 nullable-8	193
 nullable-9	193
+
+# Native ClickHouse temporal columns retain pre-epoch and fractional ticks.
+# DateTime64 timezone metadata is intentionally exposed as its UTC epoch ticks.
+query IIIIIIIIII
+SELECT row_id, date32_value, datetime64_s, datetime64_ms, datetime64_us,
+       datetime64_ns, datetime64_tokyo, time_value, time64_us, time64_ns
+FROM ch.temporal_values
+ORDER BY row_id;
+----
+1	1960-01-02	1969-12-31 23:59:59	1969-12-31 23:59:58.765	1969-12-31 23:59:58.765432	1969-12-31 23:59:58.76543211	1969-12-31 15:00:00	00:00:00	01:02:03.123456	01:02:03.123456789
+2	2024-02-29	2024-02-29 12:34:56	2024-02-29 12:34:56.123	2024-02-29 12:34:56.123456	2024-02-29 12:34:56.123456789	2024-02-29 03:34:56.789	24:00:00	12:34:56.654321	23:59:59.999999999
+
+query III
+SELECT nullable_date32, nullable_datetime64, nullable_time64
+FROM ch.temporal_values
+ORDER BY row_id;
+----
+NULL	NULL	NULL
+2024-03-01	2024-02-29 12:34:56.12345678	12:34:56.12345678
+
+# Comparison and IN pushdown cover every timestamp and time unit.
+query I
+SELECT row_id FROM ch.temporal_values
+WHERE date32_value >= DATE '2024-01-01';
+----
+2
+
+query I rowsort
+SELECT row_id FROM ch.temporal_values
+WHERE date32_value IN (DATE '1960-01-02', DATE '2000-01-01');
+----
+1
+
+query I
+SELECT row_id FROM ch.temporal_values
+WHERE datetime64_s > TIMESTAMP_S '1970-01-01 00:00:00';
+----
+2
+
+query I rowsort
+SELECT row_id FROM ch.temporal_values
+WHERE datetime64_s IN (TIMESTAMP_S '1969-12-31 23:59:59', TIMESTAMP_S '2000-01-01 00:00:00');
+----
+1
+
+query I
+SELECT row_id FROM ch.temporal_values
+WHERE datetime64_ms >= TIMESTAMP_MS '2024-02-29 12:34:56.123';
+----
+2
+
+query I rowsort
+SELECT row_id FROM ch.temporal_values
+WHERE datetime64_ms IN (TIMESTAMP_MS '1969-12-31 23:59:58.765', TIMESTAMP_MS '2000-01-01 00:00:00');
+----
+1
+
+query I
+SELECT row_id FROM ch.temporal_values
+WHERE datetime64_us = TIMESTAMP '1969-12-31 23:59:58.765432';
+----
+1
+
+query I rowsort
+SELECT row_id FROM ch.temporal_values
+WHERE datetime64_us IN (TIMESTAMP '2000-01-01 00:00:00', TIMESTAMP '2024-02-29 12:34:56.123456');
+----
+2
+
+query I
+SELECT row_id FROM ch.temporal_values
+WHERE datetime64_ns < TIMESTAMP_NS '1970-01-01 00:00:00';
+----
+1
+
+query I rowsort
+SELECT row_id FROM ch.temporal_values
+WHERE datetime64_ns IN (TIMESTAMP_NS '1969-12-31 23:59:58.765432110',
+                        TIMESTAMP_NS '2000-01-01 00:00:00');
+----
+1
+
+query I
+SELECT row_id FROM ch.temporal_values
+WHERE time64_us > TIME '12:00:00';
+----
+2
+
+query I
+SELECT row_id FROM ch.temporal_values
+WHERE time_value >= TIME '24:00:00';
+----
+2
+
+query I rowsort
+SELECT row_id FROM ch.temporal_values
+WHERE time_value IN (TIME '00:00:00', TIME '12:00:00');
+----
+1
+
+query I rowsort
+SELECT row_id FROM ch.temporal_values
+WHERE time64_us IN (TIME '01:02:03.123456', TIME '23:00:00');
+----
+1
+
+query I
+SELECT row_id FROM ch.temporal_values
+WHERE time64_ns > TIME_NS '12:00:00';
+----
+2
+
+query I rowsort
+SELECT row_id FROM ch.temporal_values
+WHERE time64_ns IN (TIME_NS '01:02:03.123456789', TIME_NS '12:00:00');
+----
+1
+
+# ClickHouse permits extended signed times, but DuckDB native TIME does not.
+statement error
+SELECT time_value FROM ch.invalid_time_values WHERE row_id = 1;
+----
+
+statement error
+SELECT time_value FROM ch.invalid_time_values WHERE row_id = 2;
+----
+
+# Exact scaling of DateTime64(7/8) must fail outside DuckDB TIMESTAMP_NS range.
+statement error
+SELECT datetime64_7 FROM ch.invalid_datetime64_values;
+----
+
+statement error
+SELECT datetime64_8 FROM ch.invalid_datetime64_values;
+----

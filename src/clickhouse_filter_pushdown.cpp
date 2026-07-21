@@ -5,6 +5,9 @@
 #include "duckdb/planner/filter/optional_filter.hpp"
 #include "duckdb/planner/filter/in_filter.hpp"
 #include "duckdb/common/string_util.hpp"
+#include "duckdb/common/types/interval.hpp"
+#include "duckdb/common/types/time.hpp"
+#include "duckdb/common/types/timestamp.hpp"
 #include "duckdb/common/types/value.hpp"
 
 namespace duckdb {
@@ -65,8 +68,29 @@ static string TransformConstant(const Value &val) {
 	case LogicalTypeId::VARCHAR:
 		return ClickhouseUtils::WriteLiteral(StringValue::Get(val));
 	case LogicalTypeId::DATE:
-	case LogicalTypeId::TIMESTAMP:
 		return ClickhouseUtils::WriteLiteral(val.ToString());
+	case LogicalTypeId::TIMESTAMP_SEC:
+		return StringUtil::Format("fromUnixTimestamp64Second(%d, 'UTC')", TimestampSValue::Get(val).value);
+	case LogicalTypeId::TIMESTAMP_MS:
+		return StringUtil::Format("fromUnixTimestamp64Milli(%d, 'UTC')", TimestampMSValue::Get(val).value);
+	case LogicalTypeId::TIMESTAMP:
+		return StringUtil::Format("fromUnixTimestamp64Micro(%d, 'UTC')", TimestampValue::Get(val).value);
+	case LogicalTypeId::TIMESTAMP_NS:
+		return StringUtil::Format("fromUnixTimestamp64Nano(%d, 'UTC')", TimestampNSValue::Get(val).value);
+	case LogicalTypeId::TIME: {
+		auto micros = TimeValue::Get(val).micros;
+		auto seconds = micros / Interval::MICROS_PER_SEC;
+		auto fraction = micros % Interval::MICROS_PER_SEC;
+		auto decimal = StringUtil::Format("%d.%06d", seconds, fraction);
+		return StringUtil::Format("toTime64(toDecimal64('%s', 6), 6)", decimal);
+	}
+	case LogicalTypeId::TIME_NS: {
+		auto nanos = val.GetValueUnsafe<dtime_ns_t>().micros;
+		auto seconds = nanos / Interval::NANOS_PER_SEC;
+		auto fraction = nanos % Interval::NANOS_PER_SEC;
+		auto decimal = StringUtil::Format("%d.%09d", seconds, fraction);
+		return StringUtil::Format("toTime64(toDecimal64('%s', 9), 9)", decimal);
+	}
 	default:
 		throw NotImplementedException("Unsupported constant type for filter pushdown");
 	}
@@ -108,7 +132,20 @@ string ClickhouseFilterPushdown::TransformFilter(string &column_name, TableFilte
 			}
 			in_list += TransformConstant(val);
 		}
-		return column_name + " IN (" + in_list + ")";
+		auto column_expression = column_name;
+		if (!in_filter.values.empty()) {
+			switch (in_filter.values[0].type().id()) {
+			case LogicalTypeId::TIME:
+				column_expression = "CAST(" + column_name + " AS Time64(6))";
+				break;
+			case LogicalTypeId::TIME_NS:
+				column_expression = "CAST(" + column_name + " AS Time64(9))";
+				break;
+			default:
+				break;
+			}
+		}
+		return column_expression + " IN (" + in_list + ")";
 	}
 	default:
 		throw InternalException("Unsupported table filter type");
