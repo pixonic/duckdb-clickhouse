@@ -9,6 +9,9 @@
 #include <clickhouse/columns/string.h>
 #include <clickhouse/columns/date.h>
 #include <clickhouse/columns/nullable.h>
+#include <clickhouse/columns/lowcardinality.h>
+
+#include <limits>
 
 namespace duckdb {
 
@@ -95,68 +98,137 @@ void ConvertTimestamp(clickhouse::ColumnRef ch_column, Vector &output, idx_t off
 	}
 }
 
+template <typename INDEX_TYPE>
+bool ConvertLowCardinalityIndexes(clickhouse::ColumnRef index_column, SelectionVector &selection, idx_t offset,
+                                  idx_t count, idx_t dictionary_size) {
+	auto typed_indexes = index_column->As<clickhouse::ColumnVector<INDEX_TYPE>>();
+	if (!typed_indexes) {
+		return false;
+	}
+
+	auto &indexes = typed_indexes->GetWritableData();
+	D_ASSERT(offset + count <= indexes.size());
+
+	for (idx_t i = 0; i < count; i++) {
+		auto dictionary_index = static_cast<uint64_t>(indexes[offset + i]);
+		if (dictionary_index >= dictionary_size || dictionary_index > std::numeric_limits<sel_t>::max()) {
+			throw InternalException("Invalid ClickHouse LowCardinality dictionary index");
+		}
+		selection.set_index(i, static_cast<sel_t>(dictionary_index));
+	}
+	return true;
+}
+
+void ConvertLowCardinality(const std::shared_ptr<clickhouse::ColumnLowCardinality> &low_cardinality, Vector &output,
+                           idx_t offset, idx_t count) {
+	auto dictionary_size = UnsafeNumericCast<idx_t>(low_cardinality->GetDictionarySize());
+	auto dictionary_column = low_cardinality->GetDictionaryColumn();
+	auto dictionary_values = dictionary_column;
+	
+	auto *nullable_dictionary = dynamic_cast<clickhouse::ColumnNullable *>(dictionary_column.get());
+	if (nullable_dictionary) {
+		dictionary_values = nullable_dictionary->Nested();
+	}
+	if (!dictionary_values->As<clickhouse::ColumnString>()) {
+		throw NotImplementedException("Unsupported ClickHouse LowCardinality type: " +
+		                              low_cardinality->Type()->GetName());
+	}
+
+	Vector dictionary(output.GetType(), dictionary_size);
+	ConvertString(dictionary_values, dictionary, 0, dictionary_size);
+	if (nullable_dictionary) {
+		ConvertValidity(nullable_dictionary, dictionary, 0, dictionary_size);
+	}
+
+	SelectionVector selection(count);
+	auto index_column = low_cardinality->GetIndexColumn();
+	auto converted = ConvertLowCardinalityIndexes<uint8_t>(index_column, selection, offset, count, dictionary_size) ||
+	                 ConvertLowCardinalityIndexes<uint16_t>(index_column, selection, offset, count, dictionary_size) ||
+	                 ConvertLowCardinalityIndexes<uint32_t>(index_column, selection, offset, count, dictionary_size) ||
+	                 ConvertLowCardinalityIndexes<uint64_t>(index_column, selection, offset, count, dictionary_size);
+	if (!converted) {
+		throw InternalException("Unexpected ClickHouse LowCardinality index column type");
+	}
+
+	output.Dictionary(dictionary, dictionary_size, selection, count);
+}
+
+void ColumnToDuckDB(clickhouse::ColumnRef ch_column, Vector &vector, idx_t offset, idx_t count) {
+	vector.SetVectorType(VectorType::FLAT_VECTOR);
+
+	auto low_cardinality = ch_column->As<clickhouse::ColumnLowCardinality>();
+	if (low_cardinality) {
+		if (vector.GetType().id() != LogicalTypeId::VARCHAR) {
+			throw NotImplementedException("Unsupported ClickHouse LowCardinality type: " +
+											low_cardinality->Type()->GetName());
+		}
+		ConvertLowCardinality(low_cardinality, vector, offset, count);
+		return;
+	}
+
+	auto *nullable = dynamic_cast<clickhouse::ColumnNullable *>(ch_column.get());
+	auto nested_column = ch_column;
+	if (nullable) {
+		nested_column = nullable->Nested();
+		ConvertValidity(nullable, vector, offset, count);
+	}
+
+	auto type = vector.GetType();
+
+	// Convert based on type
+	switch (type.id()) {
+	case LogicalTypeId::BOOLEAN:
+	case LogicalTypeId::UTINYINT:
+		ConvertDirect<uint8_t>(nested_column, vector, offset, count);
+		break;
+	case LogicalTypeId::TINYINT:
+		ConvertDirect<int8_t>(nested_column, vector, offset, count);
+		break;
+	case LogicalTypeId::SMALLINT:
+		ConvertDirect<int16_t>(nested_column, vector, offset, count);
+		break;
+	case LogicalTypeId::USMALLINT:
+		ConvertDirect<uint16_t>(nested_column, vector, offset, count);
+		break;
+	case LogicalTypeId::INTEGER:
+		ConvertDirect<int32_t>(nested_column, vector, offset, count);
+		break;
+	case LogicalTypeId::UINTEGER:
+		ConvertDirect<uint32_t>(nested_column, vector, offset, count);
+		break;
+	case LogicalTypeId::BIGINT:
+		ConvertDirect<int64_t>(nested_column, vector, offset, count);
+		break;
+	case LogicalTypeId::UBIGINT:
+		ConvertDirect<uint64_t>(nested_column, vector, offset, count);
+		break;
+	case LogicalTypeId::FLOAT:
+		ConvertDirect<float>(nested_column, vector, offset, count);
+		break;
+	case LogicalTypeId::DOUBLE:
+		ConvertDirect<double>(nested_column, vector, offset, count);
+		break;
+	case LogicalTypeId::VARCHAR:
+		ConvertString(nested_column, vector, offset, count);
+		break;
+	case LogicalTypeId::DATE:
+		ConvertDate(nested_column, vector, offset, count);
+		break;
+	case LogicalTypeId::TIMESTAMP:
+		ConvertTimestamp(nested_column, vector, offset, count);
+		break;
+	default:
+		throw NotImplementedException("Unsupported type for ClickHouse conversion: " + type.ToString());
+	}	
+}
+
 void ClickhouseConversion::BlockToDuckDB(clickhouse::Block &block, DataChunk &output, idx_t block_offset, idx_t count) {
 	output.SetCardinality(count);
 
 	for (idx_t i = 0; i < output.ColumnCount(); i++) {
-		auto &vector = output.data[i];
-		vector.SetVectorType(VectorType::FLAT_VECTOR);
-
 		auto ch_column = block[i];
-		auto *nullable = dynamic_cast<clickhouse::ColumnNullable *>(ch_column.get());
-		auto nested_column = ch_column;
-		if (nullable) {
-			nested_column = nullable->Nested();
-			ConvertValidity(nullable, vector, block_offset, count);
-		}
-
-		auto type = vector.GetType();
-
-		// Convert based on type
-		switch (type.id()) {
-		case LogicalTypeId::BOOLEAN:
-		case LogicalTypeId::UTINYINT:
-			ConvertDirect<uint8_t>(nested_column, vector, block_offset, count);
-			break;
-		case LogicalTypeId::TINYINT:
-			ConvertDirect<int8_t>(nested_column, vector, block_offset, count);
-			break;
-		case LogicalTypeId::SMALLINT:
-			ConvertDirect<int16_t>(nested_column, vector, block_offset, count);
-			break;
-		case LogicalTypeId::USMALLINT:
-			ConvertDirect<uint16_t>(nested_column, vector, block_offset, count);
-			break;
-		case LogicalTypeId::INTEGER:
-			ConvertDirect<int32_t>(nested_column, vector, block_offset, count);
-			break;
-		case LogicalTypeId::UINTEGER:
-			ConvertDirect<uint32_t>(nested_column, vector, block_offset, count);
-			break;
-		case LogicalTypeId::BIGINT:
-			ConvertDirect<int64_t>(nested_column, vector, block_offset, count);
-			break;
-		case LogicalTypeId::UBIGINT:
-			ConvertDirect<uint64_t>(nested_column, vector, block_offset, count);
-			break;
-		case LogicalTypeId::FLOAT:
-			ConvertDirect<float>(nested_column, vector, block_offset, count);
-			break;
-		case LogicalTypeId::DOUBLE:
-			ConvertDirect<double>(nested_column, vector, block_offset, count);
-			break;
-		case LogicalTypeId::VARCHAR:
-			ConvertString(nested_column, vector, block_offset, count);
-			break;
-		case LogicalTypeId::DATE:
-			ConvertDate(nested_column, vector, block_offset, count);
-			break;
-		case LogicalTypeId::TIMESTAMP:
-			ConvertTimestamp(nested_column, vector, block_offset, count);
-			break;
-		default:
-			throw NotImplementedException("Unsupported type for ClickHouse conversion: " + type.ToString());
-		}
+		auto &vector = output.data[i];
+		ColumnToDuckDB(ch_column, vector, block_offset, count);
 	}
 }
 

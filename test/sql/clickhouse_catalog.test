@@ -19,6 +19,7 @@ FROM duckdb_tables()
 WHERE database_name = 'ch'
 ORDER BY table_name;
 ----
+low_cardinality_types
 nullable_types
 supported_types
 t1
@@ -60,6 +61,17 @@ bool_value	BOOLEAN	true
 uint64_value	UBIGINT	true
 fixed_string_value	VARCHAR	true
 datetime_value	TIMESTAMP	true
+
+# LowCardinality wrappers preserve the nested DuckDB type and nullability.
+query III
+SELECT column_name, data_type, is_nullable
+FROM duckdb_columns()
+WHERE database_name = 'ch' AND table_name = 'low_cardinality_types'
+ORDER BY column_index;
+----
+row_id	UBIGINT	false
+category	VARCHAR	false
+nullable_category	VARCHAR	true
 
 statement ok
 USE ch;

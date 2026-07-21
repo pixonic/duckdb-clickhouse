@@ -90,3 +90,18 @@ SELECT
     concat('row-', toString(number)),
     if(number % 2 = 0, NULL, number)
 FROM numbers(4097);
+
+-- More than 256 distinct strings exercise a multi-byte LowCardinality index,
+-- while 4097 rows also cross DuckDB standard-vector boundaries.
+CREATE TABLE test_db.low_cardinality_types (
+    row_id UInt64,
+    category LowCardinality(String),
+    nullable_category LowCardinality(Nullable(String))
+) ENGINE = MergeTree() ORDER BY row_id;
+
+INSERT INTO test_db.low_cardinality_types
+SELECT
+    number,
+    if(number % 301 = 300, '', concat('category-', toString(number % 301))),
+    if(number % 5 = 0, NULL, concat('nullable-', toString(number % 17)))
+FROM numbers(4097);

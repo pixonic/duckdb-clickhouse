@@ -161,3 +161,53 @@ SELECT COUNT(*) FILTER (WHERE nullable_id IS NULL), SUM(length(label))
 FROM ch.vector_size;
 ----
 2049	31666
+
+# LowCardinality strings remain correct through dictionary-vector execution.
+query IIII
+SELECT COUNT(*), COUNT(DISTINCT category),
+       COUNT(*) FILTER (WHERE nullable_category IS NULL),
+       COUNT(DISTINCT nullable_category)
+FROM ch.low_cardinality_types;
+----
+4097	301	820	17
+
+query III
+SELECT row_id, category, nullable_category
+FROM ch.low_cardinality_types
+ORDER BY row_id
+LIMIT 3 OFFSET 2047;
+----
+2047	category-241	nullable-7
+2048	category-242	nullable-8
+2049	category-243	nullable-9
+
+query I
+SELECT COUNT(*)
+FROM ch.low_cardinality_types
+WHERE category = '';
+----
+13
+
+query II rowsort
+SELECT nullable_category, COUNT(*)
+FROM ch.low_cardinality_types
+WHERE nullable_category IS NOT NULL
+GROUP BY nullable_category;
+----
+nullable-0	192
+nullable-1	193
+nullable-10	192
+nullable-11	193
+nullable-12	193
+nullable-13	193
+nullable-14	193
+nullable-15	192
+nullable-16	193
+nullable-2	193
+nullable-3	193
+nullable-4	193
+nullable-5	192
+nullable-6	193
+nullable-7	193
+nullable-8	193
+nullable-9	193
