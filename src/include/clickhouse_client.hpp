@@ -2,6 +2,7 @@
 
 #include <string>
 #include <mutex>
+#include <thread>
 
 #include <clickhouse/client.h>
 #include <msd/channel.hpp>
@@ -35,11 +36,20 @@ using BlockChannel = msd::channel<ChannelEntry>;
 
 class ClickhouseResult {
 public:
-	explicit ClickhouseResult(std::shared_ptr<BlockChannel> channel);
+	ClickhouseResult(std::shared_ptr<BlockChannel> channel, std::thread worker);
+	~ClickhouseResult();
+
+	ClickhouseResult(ClickhouseResult &&other) = default;
+	ClickhouseResult &operator=(ClickhouseResult &&other) = delete;
+
+	ClickhouseResult(const ClickhouseResult &other) = delete;
+	ClickhouseResult &operator=(const ClickhouseResult &other) = delete;
+
 	std::optional<clickhouse::Block> Next();
 
 private:
 	std::shared_ptr<BlockChannel> channel;
+	std::thread worker;
 };
 
 class ClickhouseClient {

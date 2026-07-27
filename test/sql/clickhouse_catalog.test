@@ -4,6 +4,8 @@
 
 require clickhouse_scanner
 
+mode output_result
+
 statement ok
 ATTACH 'host=localhost port=9000 database=test_db' AS ch (TYPE clickhouse_scanner);
 

@@ -6,7 +6,17 @@
 
 namespace duckdb {
 
-ClickhouseResult::ClickhouseResult(std::shared_ptr<BlockChannel> channel) : channel(channel) {
+ClickhouseResult::ClickhouseResult(std::shared_ptr<BlockChannel> channel, std::thread worker)
+    : channel(std::move(channel)), worker(std::move(worker)) {
+}
+
+ClickhouseResult::~ClickhouseResult() {
+	if (channel) {
+		channel->close();
+	}
+	if (worker.joinable()) {
+		worker.join();
+	}
 }
 
 std::optional<clickhouse::Block> ClickhouseResult::Next() {
@@ -29,20 +39,18 @@ ClickhouseResult ClickhouseClient::Query(const std::string &sql) {
 	// Printer::Print(sql);
 	auto channel = std::make_shared<BlockChannel>(channel_size);
 	std::thread t(&ClickhouseClient::ExecQuery, this, sql, channel);
-	t.detach();
-	return ClickhouseResult(channel);
+	return ClickhouseResult(channel, std::move(t));
 }
 
 void ClickhouseClient::ExecQuery(const std::string &sql, std::shared_ptr<BlockChannel> channel) {
 	std::lock_guard<std::mutex> l(lock);
 
 	auto query = clickhouse::Query(sql);
-	query.OnData([=](const clickhouse::Block &block) { channel->write(ChannelEntry::FromBlock(block)); });
-
+	query.OnDataCancelable(
+	    [=](const clickhouse::Block &block) { return channel->write(ChannelEntry::FromBlock(block)); });
 	query.OnException([=](const clickhouse::Exception &ex) { channel->write(ChannelEntry::FromError(ex)); });
 
 	client.Select(query);
-
 	channel->close();
 }
 

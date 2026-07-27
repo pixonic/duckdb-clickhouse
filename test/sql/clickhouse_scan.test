@@ -4,6 +4,8 @@
 
 require clickhouse_scanner
 
+mode output_result
+
 statement ok
 ATTACH 'host=localhost port=9000 database=test_db' AS ch (TYPE clickhouse_scanner);
 
@@ -346,3 +348,9 @@ SELECT datetime64_7 FROM ch.invalid_datetime64_values;
 statement error
 SELECT datetime64_8 FROM ch.invalid_datetime64_values;
 ----
+
+# The ClickHouse connection remains usable after canceled scans.
+query I
+SELECT id FROM ch.t1 WHERE id = 1;
+----
+1
