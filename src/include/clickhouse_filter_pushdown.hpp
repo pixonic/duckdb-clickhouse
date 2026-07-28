@@ -10,11 +10,12 @@ class ClickhouseFilterPushdown {
 public:
 	// Transform DuckDB table filters into ClickHouse WHERE clause
 	static string TransformFilters(const vector<column_t> &column_ids, optional_ptr<TableFilterSet> filters,
-	                               const vector<string> &names);
+	                               const vector<string> &names, const vector<string> &source_types);
 
 private:
-	static string TransformFilter(string &column_name, TableFilter &filter);
-	static string CreateExpression(string &column_name, vector<unique_ptr<TableFilter>> &filters, string op);
+	static string TransformFilter(const string &column_name, const string &source_type, TableFilter &filter);
+	static string CreateExpression(const string &column_name, const string &source_type,
+	                               vector<unique_ptr<TableFilter>> &filters, const string &op);
 	static string TransformComparison(ExpressionType type);
 };
 

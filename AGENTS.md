@@ -47,6 +47,7 @@ make tidy-check-fixed   # Run clang-tidy on extension source code
 ```
 
 The tidy check runs clang-tidy on files matching `src/.*` with the project's `.clang-tidy` configuration.
+Don
 
 ## Project Structure
 
@@ -229,4 +230,3 @@ return ClickhouseResult(channel);
 
 - Test syntax: [DuckDB SQLLogicTest Documentation](https://duckdb.org/dev/sqllogictest/intro.html)
 - Extension template: `duckdb/extension/` directory in DuckDB repository
-- ClickHouse C++ client: `third_party` includes and linked libraries

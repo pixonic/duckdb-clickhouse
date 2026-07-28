@@ -214,6 +214,121 @@ nullable-7	193
 nullable-8	193
 nullable-9	193
 
+# Recursive array conversion covers every scalar family.
+query IIIIIIII
+SELECT bool_values[1], uint8_values[2], int8_values[1], uint16_values[2],
+       int16_values[1], uint32_values[2], int32_values[1], uint64_values[2]
+FROM ch.array_types;
+----
+true	255	-128	65535	-32768	4294967295	-2147483648	18446744073709551615
+
+query IIIIIII
+SELECT int64_values[1], float32_values[1], float64_values[2], string_values[1],
+       fixed_string_values[2], date_values[2], date32_values[1]
+FROM ch.array_types;
+----
+-9223372036854775808	1.5	-4.5	clickhouse	value	2024-02-29	1960-01-02
+
+query IIIIIII
+SELECT datetime_values[2], datetime64_values[1], time_values[2],
+       time64_values[1], low_cardinality_values[1], low_cardinality_values[2],
+       nullable_low_cardinality_values[2]
+FROM ch.array_types;
+----
+2024-02-29 12:34:56	1969-12-31 23:59:58.76543211	24:00:00	01:02:03.123456789	low	cardinality	NULL
+
+# Empty arrays, nullable leaves, nested arrays, and zero-child nested arrays.
+query III
+SELECT row_id, nullable_values, nested_values
+FROM ch.array_features
+ORDER BY row_id;
+----
+1	[]	[]
+2	[1, NULL, 3]	[[a, NULL], [], [c]]
+3	[2, 4]	[[z]]
+
+# Parent and flattened-child offsets remain correct across vector boundaries.
+query IIII
+SELECT COUNT(*), SUM(length(values)), COUNT(*) FILTER (WHERE length(values) = 0),
+       (SELECT COUNT(*) FROM ch.array_vector_size, UNNEST(values) AS u(value) WHERE value IS NULL)
+FROM ch.array_vector_size;
+----
+4097	6144	1025	1229
+
+query II
+SELECT row_id, values
+FROM ch.array_vector_size
+WHERE row_id BETWEEN 2047 AND 2049
+ORDER BY row_id;
+----
+2047	[2047, 2048, 2049]
+2048	[]
+2049	[2049]
+
+# LIST constants retain the exact ClickHouse source declaration during pushdown.
+# These include filter-only projected columns, empty/nested/nullable values,
+# FixedString, Date, and nanosecond DateTime64 values.
+query I
+SELECT row_id FROM ch.array_features WHERE fixed_values = ['abc', 'xyz'];
+----
+2
+
+query I rowsort
+SELECT row_id FROM ch.array_features WHERE date_values IN ([], [DATE '2024-02-29']);
+----
+1
+3
+
+query I
+SELECT row_id FROM ch.array_features
+WHERE datetime_values = [TIMESTAMP_NS '1969-12-31 23:59:58.765432110'];
+----
+2
+
+query I rowsort
+SELECT row_id FROM ch.array_features WHERE nullable_values != [2, 4];
+----
+1
+2
+
+query I
+SELECT row_id FROM ch.array_features WHERE nullable_values >= [2, 4];
+----
+3
+
+query I rowsort
+SELECT row_id FROM ch.array_features WHERE date_values < [DATE '2000-01-01'];
+----
+1
+2
+
+query I rowsort
+SELECT row_id FROM ch.array_features WHERE date_values <= [DATE '1970-01-01'];
+----
+1
+2
+
+query I
+SELECT row_id FROM ch.array_features WHERE date_values > [DATE '1970-01-01'];
+----
+3
+
+query I
+SELECT row_id FROM ch.array_features WHERE nested_values = [['a', NULL], [], ['c']];
+----
+2
+
+query I
+SELECT row_id FROM ch.array_features WHERE nullable_values = [1, NULL, 3];
+----
+2
+
+query I
+SELECT row_id FROM ch.array_types
+WHERE low_cardinality_values = ['low', 'cardinality'];
+----
+1
+
 # Native ClickHouse temporal columns retain pre-epoch and fractional ticks.
 # DateTime64 timezone metadata is intentionally exposed as its UTC epoch ticks.
 query IIIIIIIIII

@@ -15,6 +15,7 @@
 #include <clickhouse/columns/time.h>
 #include <clickhouse/columns/nullable.h>
 #include <clickhouse/columns/lowcardinality.h>
+#include <clickhouse/columns/array.h>
 
 #include <limits>
 
@@ -268,6 +269,44 @@ void ConvertLowCardinality(const std::shared_ptr<clickhouse::ColumnLowCardinalit
 	output.Dictionary(dictionary, dictionary_size, selection, count);
 }
 
+void ColumnToDuckDB(clickhouse::ColumnRef ch_column, Vector &vector, idx_t offset, idx_t count);
+
+static void ConvertArray(const std::shared_ptr<clickhouse::ColumnArray> &array, Vector &output, idx_t offset,
+                         idx_t count) {
+	auto source_size = UnsafeNumericCast<idx_t>(array->Size());
+	if (offset > source_size || count > source_size - offset) {
+		throw InternalException("ClickHouse array row range is out of bounds");
+	}
+
+	auto data_column = array->GetData();
+	auto data_size = UnsafeNumericCast<idx_t>(data_column->Size());
+	auto child_offset = count == 0 ? 0 : UnsafeNumericCast<idx_t>(array->GetOffset(offset));
+	if (child_offset > data_size) {
+		throw InternalException("ClickHouse array child offset is out of bounds");
+	}
+
+	auto result_data = FlatVector::GetData<list_entry_t>(output);
+	idx_t child_count = 0;
+	for (idx_t i = 0; i < count; i++) {
+		auto row_offset = UnsafeNumericCast<idx_t>(array->GetOffset(offset + i));
+		auto row_count = UnsafeNumericCast<idx_t>(array->GetSize(offset + i));
+		if (row_offset > data_size || row_offset != child_offset + child_count || row_count > data_size - row_offset) {
+			throw InternalException("Invalid ClickHouse array offsets");
+		}
+		result_data[i].offset = child_count;
+		result_data[i].length = row_count;
+		child_count += row_count;
+	}
+
+	ListVector::Reserve(output, child_count);
+	ListVector::SetListSize(output, child_count);
+	if (child_count == 0) {
+		return;
+	}
+	auto &child = ListVector::GetEntry(output);
+	ColumnToDuckDB(data_column, child, child_offset, child_count);
+}
+
 void ColumnToDuckDB(clickhouse::ColumnRef ch_column, Vector &vector, idx_t offset, idx_t count) {
 	vector.SetVectorType(VectorType::FLAT_VECTOR);
 
@@ -289,9 +328,16 @@ void ColumnToDuckDB(clickhouse::ColumnRef ch_column, Vector &vector, idx_t offse
 	}
 
 	auto type = vector.GetType();
+	auto array = nested_column->As<clickhouse::ColumnArray>();
+	if ((type.id() == LogicalTypeId::LIST) != static_cast<bool>(array)) {
+		throw InternalException("ClickHouse and DuckDB array column types do not match");
+	}
 
 	// Convert based on type
 	switch (type.id()) {
+	case LogicalTypeId::LIST:
+		ConvertArray(array, vector, offset, count);
+		break;
 	case LogicalTypeId::BOOLEAN:
 	case LogicalTypeId::UTINYINT:
 		ConvertDirect<uint8_t>(nested_column, vector, offset, count);

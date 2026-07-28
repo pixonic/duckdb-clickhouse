@@ -175,3 +175,81 @@ SELECT
     if(number % 301 = 300, '', concat('category-', toString(number % 301))),
     if(number % 5 = 0, NULL, concat('nullable-', toString(number % 17)))
 FROM numbers(4097);
+
+CREATE TABLE test_db.array_types (
+    row_id UInt8,
+    bool_values Array(Bool),
+    uint8_values Array(UInt8),
+    int8_values Array(Int8),
+    uint16_values Array(UInt16),
+    int16_values Array(Int16),
+    uint32_values Array(UInt32),
+    int32_values Array(Int32),
+    uint64_values Array(UInt64),
+    int64_values Array(Int64),
+    float32_values Array(Float32),
+    float64_values Array(Float64),
+    string_values Array(String),
+    fixed_string_values Array(FixedString(5)),
+    date_values Array(Date),
+    date32_values Array(Date32),
+    datetime_values Array(DateTime('UTC')),
+    datetime64_values Array(DateTime64(9, 'UTC')),
+    time_values Array(Time),
+    time64_values Array(Time64(9)),
+    low_cardinality_values Array(LowCardinality(String)),
+    nullable_low_cardinality_values Array(LowCardinality(Nullable(String)))
+) ENGINE = MergeTree() ORDER BY row_id;
+
+INSERT INTO test_db.array_types VALUES (
+    1,
+    [true, false],
+    [0, 255],
+    [-128, 127],
+    [0, 65535],
+    [-32768, 32767],
+    [0, 4294967295],
+    [-2147483648, 2147483647],
+    [0, 18446744073709551615],
+    [-9223372036854775808, 9223372036854775807],
+    [1.5, -2.5],
+    [3.25, -4.5],
+    ['clickhouse', 'array'],
+    ['fixed', 'value'],
+    ['1970-01-01', '2024-02-29'],
+    ['1960-01-02', '2024-03-01'],
+    ['1970-01-01 00:00:00', '2024-02-29 12:34:56'],
+    ['1969-12-31 23:59:58.765432110', '2024-02-29 12:34:56.123456789'],
+    ['00:00:00', '24:00:00'],
+    ['01:02:03.123456789', '23:59:59.999999999'],
+    ['low', 'cardinality'],
+    ['nullable', NULL]
+);
+
+CREATE TABLE test_db.array_features (
+    row_id UInt8,
+    nullable_values Array(Nullable(Int32)),
+    nested_values Array(Array(Nullable(String))),
+    fixed_values Array(FixedString(3)),
+    date_values Array(Date),
+    datetime_values Array(DateTime64(9, 'UTC'))
+) ENGINE = MergeTree() ORDER BY row_id;
+
+INSERT INTO test_db.array_features VALUES
+    (1, [], [], [], [], []),
+    (2, [1, NULL, 3], [['a', NULL], [], ['c']], ['abc', 'xyz'], ['1970-01-01'],
+     ['1969-12-31 23:59:58.765432110']),
+    (3, [2, 4], [['z']], ['zzz'], ['2024-02-29'], ['2024-02-29 12:34:56.123456789']);
+
+-- Variable parent and nullable-child lengths cross both 2,048-row output
+-- boundaries while arriving in one ClickHouse block.
+CREATE TABLE test_db.array_vector_size (
+    row_id UInt64,
+    values Array(Nullable(Int64))
+) ENGINE = MergeTree() ORDER BY row_id;
+
+INSERT INTO test_db.array_vector_size
+SELECT
+    number,
+    arrayMap(x -> if((number + x) % 5 = 0, NULL, toInt64(number + x)), range(toUInt32(number % 4)))
+FROM numbers(4097);

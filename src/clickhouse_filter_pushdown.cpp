@@ -12,11 +12,11 @@
 
 namespace duckdb {
 
-string ClickhouseFilterPushdown::CreateExpression(string &column_name, vector<unique_ptr<TableFilter>> &filters,
-                                                  string op) {
+string ClickhouseFilterPushdown::CreateExpression(const string &column_name, const string &source_type,
+                                                  vector<unique_ptr<TableFilter>> &filters, const string &op) {
 	vector<string> filter_entries;
 	for (auto &filter : filters) {
-		auto new_filter = TransformFilter(column_name, *filter);
+		auto new_filter = TransformFilter(column_name, source_type, *filter);
 		if (new_filter.empty()) {
 			continue;
 		}
@@ -47,7 +47,7 @@ string ClickhouseFilterPushdown::TransformComparison(ExpressionType type) {
 	}
 }
 
-static string TransformConstant(const Value &val) {
+static string TransformConstantLiteral(const Value &val) {
 	if (val.IsNull()) {
 		return "NULL";
 	}
@@ -91,12 +91,29 @@ static string TransformConstant(const Value &val) {
 		auto decimal = StringUtil::Format("%d.%09d", seconds, fraction);
 		return StringUtil::Format("toTime64(toDecimal64('%s', 9), 9)", decimal);
 	}
+	case LogicalTypeId::LIST: {
+		vector<string> children;
+		for (auto &child : ListValue::GetChildren(val)) {
+			children.push_back(TransformConstantLiteral(child));
+		}
+		return "[" + StringUtil::Join(children, ", ") + "]";
+	}
 	default:
 		throw NotImplementedException("Unsupported constant type for filter pushdown");
 	}
 }
 
-string ClickhouseFilterPushdown::TransformFilter(string &column_name, TableFilter &filter) {
+static string TransformConstant(const Value &val, const string &source_type) {
+	auto literal = TransformConstantLiteral(val);
+	// TODO remove later
+	// if (val.type().id() == LogicalTypeId::LIST) {
+	// 	return StringUtil::Format("CAST(%s, %s)", literal, ClickhouseUtils::WriteLiteral(source_type));
+	// }
+	return literal;
+}
+
+string ClickhouseFilterPushdown::TransformFilter(const string &column_name, const string &source_type,
+                                                 TableFilter &filter) {
 	switch (filter.filter_type) {
 	case TableFilterType::IS_NULL:
 		return column_name + " IS NULL";
@@ -104,21 +121,21 @@ string ClickhouseFilterPushdown::TransformFilter(string &column_name, TableFilte
 		return column_name + " IS NOT NULL";
 	case TableFilterType::CONJUNCTION_AND: {
 		auto &conjunction_filter = filter.Cast<ConjunctionAndFilter>();
-		return CreateExpression(column_name, conjunction_filter.child_filters, "AND");
+		return CreateExpression(column_name, source_type, conjunction_filter.child_filters, "AND");
 	}
 	case TableFilterType::CONJUNCTION_OR: {
 		auto &conjunction_filter = filter.Cast<ConjunctionOrFilter>();
-		return CreateExpression(column_name, conjunction_filter.child_filters, "OR");
+		return CreateExpression(column_name, source_type, conjunction_filter.child_filters, "OR");
 	}
 	case TableFilterType::CONSTANT_COMPARISON: {
 		auto &constant_filter = filter.Cast<ConstantFilter>();
-		auto constant_string = TransformConstant(constant_filter.constant);
+		auto constant_string = TransformConstant(constant_filter.constant, source_type);
 		auto operator_string = TransformComparison(constant_filter.comparison_type);
 		return StringUtil::Format("%s %s %s", column_name, operator_string, constant_string);
 	}
 	case TableFilterType::OPTIONAL_FILTER: {
 		auto &optional_filter = filter.Cast<OptionalFilter>();
-		return TransformFilter(column_name, *optional_filter.child_filter);
+		return TransformFilter(column_name, source_type, *optional_filter.child_filter);
 	}
 	case TableFilterType::DYNAMIC_FILTER: {
 		return string();
@@ -130,7 +147,7 @@ string ClickhouseFilterPushdown::TransformFilter(string &column_name, TableFilte
 			if (!in_list.empty()) {
 				in_list += ", ";
 			}
-			in_list += TransformConstant(val);
+			in_list += TransformConstant(val, source_type);
 		}
 		auto column_expression = column_name;
 		if (!in_filter.values.empty()) {
@@ -153,16 +170,18 @@ string ClickhouseFilterPushdown::TransformFilter(string &column_name, TableFilte
 }
 
 string ClickhouseFilterPushdown::TransformFilters(const vector<column_t> &column_ids,
-                                                  optional_ptr<TableFilterSet> filters, const vector<string> &names) {
+                                                  optional_ptr<TableFilterSet> filters, const vector<string> &names,
+                                                  const vector<string> &source_types) {
 	if (!filters || filters->filters.empty()) {
 		// no filters
 		return string();
 	}
 	string result;
 	for (auto &entry : filters->filters) {
-		auto column_name = ClickhouseUtils::WriteIdentifier(names[column_ids[entry.first]]);
+		auto column_id = column_ids[entry.first];
+		auto column_name = ClickhouseUtils::WriteIdentifier(names[column_id]);
 		auto &filter = *entry.second;
-		auto new_filter = TransformFilter(column_name, filter);
+		auto new_filter = TransformFilter(column_name, source_types[column_id], filter);
 		if (new_filter.empty()) {
 			continue;
 		}

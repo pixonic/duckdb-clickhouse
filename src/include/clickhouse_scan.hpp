@@ -18,6 +18,7 @@ struct ClickhouseScanBindData : public FunctionData {
 
 	vector<string> column_names;
 	vector<LogicalType> column_types;
+	vector<string> source_column_types;
 
 	unique_ptr<FunctionData> Copy() const override;
 	bool Equals(const FunctionData &other_p) const override;

@@ -21,6 +21,9 @@ FROM duckdb_tables()
 WHERE database_name = 'ch'
 ORDER BY table_name;
 ----
+array_features
+array_types
+array_vector_size
 invalid_datetime64_values
 invalid_time_values
 low_cardinality_types
@@ -120,6 +123,39 @@ ORDER BY column_index;
 row_id	UBIGINT	false
 category	VARCHAR	false
 nullable_category	VARCHAR	true
+
+# Array wrappers map recursively to DuckDB LIST, without making the
+# parent nullable when only the elements are Nullable.
+query III
+SELECT column_name, data_type, is_nullable
+FROM duckdb_columns()
+WHERE database_name = 'ch' AND table_name = 'array_features'
+ORDER BY column_index;
+----
+row_id	UTINYINT	false
+nullable_values	INTEGER[]	false
+nested_values	VARCHAR[][]	false
+fixed_values	VARCHAR[]	false
+date_values	DATE[]	false
+datetime_values	TIMESTAMP_NS[]	false
+
+query II
+SELECT column_name, data_type
+FROM duckdb_columns()
+WHERE database_name = 'ch' AND table_name = 'array_types'
+  AND column_name IN ('bool_values', 'uint64_values', 'float64_values',
+                      'date32_values', 'datetime64_values', 'time64_values',
+                      'low_cardinality_values', 'nullable_low_cardinality_values')
+ORDER BY column_index;
+----
+bool_values	BOOLEAN[]
+uint64_values	UBIGINT[]
+float64_values	DOUBLE[]
+date32_values	DATE[]
+datetime64_values	TIMESTAMP_NS[]
+time64_values	TIME_NS[]
+low_cardinality_values	VARCHAR[]
+nullable_low_cardinality_values	VARCHAR[]
 
 statement ok
 USE ch;
