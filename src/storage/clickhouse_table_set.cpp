@@ -14,10 +14,9 @@ namespace ch = clickhouse;
 
 namespace duckdb {
 
-static void AddColumn(const ch::Block &block, idx_t row_idx, CreateTableInfo &info, vector<string> &source_types) {
+static void AddColumn(const ch::Block &block, idx_t row_idx, CreateTableInfo &info) {
 	auto column_name = string(block[1]->As<ch::ColumnString>()->At(row_idx));
 	auto raw_type = string(block[2]->As<ch::ColumnString>()->At(row_idx));
-	source_types.push_back(raw_type);
 	auto raw_default_expr = string(block[3]->As<ch::ColumnString>()->At(row_idx));
 
 	int64_t numeric_precision = -1;
@@ -79,9 +78,7 @@ ORDER BY table, position;
 	                                 "${SCHEMA_NAME}", ClickhouseUtils::WriteLiteral(schema.name));
 
 	vector<unique_ptr<CreateTableInfo>> tables;
-	vector<vector<string>> table_source_types;
 	unique_ptr<CreateTableInfo> info;
-	vector<string> source_types;
 
 	auto result = transaction.GetClient().Query(query);
 
@@ -98,23 +95,19 @@ ORDER BY table, position;
 			if (!info || info->table != table_name) {
 				if (info) {
 					tables.push_back(std::move(info));
-					table_source_types.push_back(std::move(source_types));
 				}
 				info = make_uniq<CreateTableInfo>(schema, string(table_name));
-				source_types.clear();
 			}
-			AddColumn(block, i, *info, source_types);
+			AddColumn(block, i, *info);
 		}
 	}
 
 	if (info) {
 		tables.push_back(std::move(info));
-		table_source_types.push_back(std::move(source_types));
 	}
 
 	for (idx_t i = 0; i < tables.size(); i++) {
-		auto table_entry =
-		    make_uniq<ClickhouseTableEntry>(catalog, schema, *tables[i], std::move(table_source_types[i]));
+		auto table_entry = make_uniq<ClickhouseTableEntry>(catalog, schema, *tables[i]);
 		CreateEntry(std::move(table_entry));
 	}
 }

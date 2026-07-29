@@ -9,8 +9,7 @@ namespace duckdb {
 
 class ClickhouseTableEntry : public TableCatalogEntry {
 public:
-	ClickhouseTableEntry(Catalog &catalog, SchemaCatalogEntry &schema, CreateTableInfo &info,
-	                     vector<string> source_column_types);
+	ClickhouseTableEntry(Catalog &catalog, SchemaCatalogEntry &schema, CreateTableInfo &info);
 
 	vector<string> source_column_types;
 

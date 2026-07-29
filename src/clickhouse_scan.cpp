@@ -86,8 +86,8 @@ unique_ptr<GlobalTableFunctionState> ClickhouseScanFunction::InitGlobal(ClientCo
 	select += ClickhouseUtils::WriteIdentifier(table.name);
 
 	// Filter pushdown
-	string filter_string = ClickhouseFilterPushdown::TransformFilters(
-	    input.column_ids, input.filters, bind_data.column_names, bind_data.source_column_types);
+	string filter_string =
+	    ClickhouseFilterPushdown::TransformFilters(input.column_ids, input.filters, bind_data.column_names);
 	if (!filter_string.empty()) {
 		select += " WHERE " + filter_string;
 	}
