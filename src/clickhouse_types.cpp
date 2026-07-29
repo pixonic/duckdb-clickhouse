@@ -116,6 +116,8 @@ static LogicalType TypeToLogicalType(const ClickhouseTypeData &input, const stri
 		return LogicalType::FLOAT;
 	} else if (type == "Float64") {
 		return LogicalType::DOUBLE;
+	} else if (type == "UUID") {
+		return LogicalType::UUID;
 	} else if (type == "String" || IsParameterizedType(type, "FixedString")) {
 		return LogicalType::VARCHAR;
 	} else {

@@ -32,6 +32,7 @@ supported_types
 t1
 temporal_precision_types
 temporal_values
+uuid_types
 vector_size
 
 # Verify every supported ClickHouse type is exposed as the intended DuckDB type.
@@ -113,6 +114,17 @@ uint64_value	UBIGINT	true
 fixed_string_value	VARCHAR	true
 datetime_value	TIMESTAMP	true
 
+# UUID maps to DuckDB's native UUID type through Nullable wrappers.
+query III
+SELECT column_name, data_type, is_nullable
+FROM duckdb_columns()
+WHERE database_name = 'ch' AND table_name = 'uuid_types'
+ORDER BY column_index;
+----
+row_id	UTINYINT	false
+uuid_value	UUID	false
+nullable_uuid	UUID	true
+
 # LowCardinality wrappers preserve the nested DuckDB type and nullability.
 query III
 SELECT column_name, data_type, is_nullable
@@ -138,6 +150,20 @@ nested_values	VARCHAR[][]	false
 fixed_values	VARCHAR[]	false
 date_values	DATE[]	false
 datetime_values	TIMESTAMP_NS[]	false
+uuid_values	UUID[]	false
+nullable_uuid_values	UUID[]	false
+nested_uuid_values	UUID[][]	false
+
+# UUID conversion also preserves top-level nullability in the vector-boundary fixture.
+query III
+SELECT column_name, data_type, is_nullable
+FROM duckdb_columns()
+WHERE database_name = 'ch' AND table_name = 'vector_size'
+  AND column_name IN ('uuid_value', 'nullable_uuid')
+ORDER BY column_index;
+----
+uuid_value	UUID	false
+nullable_uuid	UUID	true
 
 query II
 SELECT column_name, data_type

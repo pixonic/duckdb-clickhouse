@@ -5,6 +5,7 @@
 #include "duckdb/common/types/time.hpp"
 #include "duckdb/common/types/timestamp.hpp"
 #include "duckdb/common/types/string_type.hpp"
+#include "duckdb/common/types/uuid.hpp"
 #include "duckdb/common/operator/multiply.hpp"
 #include "duckdb/common/vector_operations/vector_operations.hpp"
 
@@ -16,6 +17,7 @@
 #include <clickhouse/columns/nullable.h>
 #include <clickhouse/columns/lowcardinality.h>
 #include <clickhouse/columns/array.h>
+#include <clickhouse/columns/uuid.h>
 
 #include <limits>
 
@@ -79,6 +81,19 @@ void ConvertString(clickhouse::ColumnRef ch_column, Vector &output, idx_t offset
 	}
 
 	throw InternalException("Unexpected ClickHouse string column type");
+}
+
+void ConvertUUID(clickhouse::ColumnRef ch_column, Vector &output, idx_t offset, idx_t count) {
+	auto ch_uuid = ch_column->As<clickhouse::ColumnUUID>();
+	if (!ch_uuid) {
+		throw InternalException("Unexpected ClickHouse UUID column type");
+	}
+
+	auto result_data = FlatVector::GetData<hugeint_t>(output);
+	for (idx_t i = 0; i < count; i++) {
+		auto value = ch_uuid->At(offset + i);
+		result_data[i] = UUID::FromUHugeint(uhugeint_t(value.first, value.second));
+	}
 }
 
 void ConvertDate(clickhouse::ColumnRef ch_column, Vector &output, idx_t offset, idx_t count) {
@@ -371,6 +386,9 @@ void ColumnToDuckDB(clickhouse::ColumnRef ch_column, Vector &vector, idx_t offse
 		break;
 	case LogicalTypeId::VARCHAR:
 		ConvertString(nested_column, vector, offset, count);
+		break;
+	case LogicalTypeId::UUID:
+		ConvertUUID(nested_column, vector, offset, count);
 		break;
 	case LogicalTypeId::DATE:
 		ConvertDate(nested_column, vector, offset, count);

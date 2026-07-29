@@ -31,7 +31,39 @@ static string TransformComparison(ExpressionType type) {
 	}
 }
 
-static string TransformConstant(const Value &val) {
+static bool IsOrderedComparison(ExpressionType type) {
+	switch (type) {
+	case ExpressionType::COMPARE_LESSTHAN:
+	case ExpressionType::COMPARE_GREATERTHAN:
+	case ExpressionType::COMPARE_LESSTHANOREQUALTO:
+	case ExpressionType::COMPARE_GREATERTHANOREQUALTO:
+		return true;
+	default:
+		return false;
+	}
+}
+
+static bool ContainsUUID(const LogicalType &type) {
+	if (type.id() == LogicalTypeId::UUID) {
+		return true;
+	}
+	return type.id() == LogicalTypeId::LIST && ContainsUUID(ListType::GetChildType(type));
+}
+
+static string TransformOrderedUUIDExpression(const string &expression, const LogicalType &type, idx_t depth = 0) {
+	if (type.id() == LogicalTypeId::UUID) {
+		return "toString(" + expression + ")";
+	}
+	if (type.id() != LogicalTypeId::LIST || !ContainsUUID(type)) {
+		return expression;
+	}
+
+	auto lambda_parameter = StringUtil::Format("uuid_element_%d", depth);
+	auto child_expression = TransformOrderedUUIDExpression(lambda_parameter, ListType::GetChildType(type), depth + 1);
+	return StringUtil::Format("arrayMap(%s -> %s, %s)", lambda_parameter, child_expression, expression);
+}
+
+static string TransformConstant(const Value &val, bool uuid_as_string = false) {
 	if (val.IsNull()) {
 		return "NULL";
 	}
@@ -51,6 +83,10 @@ static string TransformConstant(const Value &val) {
 		return val.ToString();
 	case LogicalTypeId::VARCHAR:
 		return ClickhouseUtils::WriteLiteral(StringValue::Get(val));
+	case LogicalTypeId::UUID: {
+		auto literal = ClickhouseUtils::WriteLiteral(val.ToString());
+		return uuid_as_string ? literal : "toUUID(" + literal + ")";
+	}
 	case LogicalTypeId::DATE:
 		return ClickhouseUtils::WriteLiteral(val.ToString());
 	case LogicalTypeId::TIMESTAMP_SEC:
@@ -78,7 +114,7 @@ static string TransformConstant(const Value &val) {
 	case LogicalTypeId::LIST: {
 		vector<string> children;
 		for (auto &child : ListValue::GetChildren(val)) {
-			children.push_back(TransformConstant(child));
+			children.push_back(TransformConstant(child, uuid_as_string));
 		}
 		return "[" + StringUtil::Join(children, ", ") + "]";
 	}
@@ -119,9 +155,14 @@ string ClickhouseFilterPushdown::TransformFilter(const string &column_name, Tabl
 	}
 	case TableFilterType::CONSTANT_COMPARISON: {
 		auto &constant_filter = filter.Cast<ConstantFilter>();
-		auto constant_string = TransformConstant(constant_filter.constant);
+		auto ordered_uuid_comparison =
+		    IsOrderedComparison(constant_filter.comparison_type) && ContainsUUID(constant_filter.constant.type());
+		auto constant_string = TransformConstant(constant_filter.constant, ordered_uuid_comparison);
 		auto operator_string = TransformComparison(constant_filter.comparison_type);
-		return StringUtil::Format("%s %s %s", column_name, operator_string, constant_string);
+		auto column_expression = ordered_uuid_comparison
+		                             ? TransformOrderedUUIDExpression(column_name, constant_filter.constant.type())
+		                             : column_name;
+		return StringUtil::Format("%s %s %s", column_expression, operator_string, constant_string);
 	}
 	case TableFilterType::OPTIONAL_FILTER: {
 		auto &optional_filter = filter.Cast<OptionalFilter>();

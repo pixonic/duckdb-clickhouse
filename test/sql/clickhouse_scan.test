@@ -140,6 +140,80 @@ FROM ch.nullable_types;
 ----
 1	1
 
+# UUID decoding preserves canonical word and byte order, including nullable values.
+query III
+SELECT row_id, uuid_value, nullable_uuid
+FROM ch.uuid_types
+ORDER BY row_id;
+----
+1	00000000-0000-0000-0000-000000000000	NULL
+2	00000000-0000-0000-0000-000000000001	00000000-0000-0000-0000-000000000001
+3	00000000-0000-0001-0000-000000000000	00000000-0000-0001-0000-000000000000
+4	00112233-4455-6677-8899-aabbccddeeff	00112233-4455-6677-8899-aabbccddeeff
+5	ffffffff-ffff-ffff-ffff-ffffffffffff	ffffffff-ffff-ffff-ffff-ffffffffffff
+
+query III
+SELECT COUNT(*), COUNT(DISTINCT uuid_value),
+       COUNT(*) FILTER (WHERE nullable_uuid IS NULL)
+FROM ch.uuid_types;
+----
+5	5	1
+
+# UUID equality, inequality, and IN predicates retain native ClickHouse UUID operands.
+query I
+SELECT row_id FROM ch.uuid_types
+WHERE uuid_value = UUID '00112233-4455-6677-8899-aabbccddeeff';
+----
+4
+
+query I rowsort
+SELECT row_id FROM ch.uuid_types
+WHERE uuid_value != UUID '00000000-0000-0000-0000-000000000000';
+----
+2
+3
+4
+5
+
+query I rowsort
+SELECT row_id FROM ch.uuid_types
+WHERE uuid_value IN (UUID '00000000-0000-0000-0000-000000000001',
+                     UUID 'ffffffff-ffff-ffff-ffff-ffffffffffff');
+----
+2
+5
+
+# ClickHouse orders UUID by its second half, while DuckDB orders by canonical
+# UUID text. These predicates verify pushdown normalizes every range operator.
+query I rowsort
+SELECT row_id FROM ch.uuid_types
+WHERE uuid_value < UUID '00000000-0000-0001-0000-000000000000';
+----
+1
+2
+
+query I rowsort
+SELECT row_id FROM ch.uuid_types
+WHERE uuid_value <= UUID '00000000-0000-0000-0000-000000000001';
+----
+1
+2
+
+query I rowsort
+SELECT row_id FROM ch.uuid_types
+WHERE uuid_value > UUID '00000000-0000-0001-0000-000000000000';
+----
+4
+5
+
+query I rowsort
+SELECT row_id FROM ch.uuid_types
+WHERE uuid_value >= UUID '00000000-0000-0001-0000-000000000000';
+----
+3
+4
+5
+
 # The source block has STANDARD_VECTOR_SIZE * 2 + 1 rows. These aggregates
 # detect skipped, duplicated, or corrupted values at DuckDB vector boundaries.
 query IIIIII
@@ -157,6 +231,24 @@ LIMIT 3 OFFSET 2047;
 2047	row-2047	2047
 2048	row-2048	NULL
 2049	row-2049	2049
+
+query III
+SELECT id, uuid_value, nullable_uuid
+FROM ch.vector_size
+ORDER BY id
+LIMIT 3 OFFSET 2047;
+----
+2047	00000000-0000-07ff-0000-000000000000	00000000-0000-07ff-0000-000000000000
+2048	00000000-0000-0800-0000-000000000000	NULL
+2049	00000000-0000-0801-0000-000000000000	00000000-0000-0801-0000-000000000000
+
+query III
+SELECT COUNT(DISTINCT uuid_value),
+       COUNT(*) FILTER (WHERE nullable_uuid IS NULL),
+       COUNT(DISTINCT nullable_uuid)
+FROM ch.vector_size;
+----
+4097	2049	2048
 
 query II
 SELECT COUNT(*) FILTER (WHERE nullable_id IS NULL), SUM(length(label))
@@ -247,6 +339,16 @@ ORDER BY row_id;
 2	[1, NULL, 3]	[[a, NULL], [], [c]]
 3	[2, 4]	[[z]]
 
+# UUID arrays preserve empty arrays, nullable elements, nesting, and canonical text.
+query IIII
+SELECT row_id, uuid_values, nullable_uuid_values, nested_uuid_values
+FROM ch.array_features
+ORDER BY row_id;
+----
+1	[]	[]	[]
+2	[00000000-0000-0000-0000-000000000001]	[00000000-0000-0000-0000-000000000000, NULL, 00112233-4455-6677-8899-aabbccddeeff, ffffffff-ffff-ffff-ffff-ffffffffffff]	[[00000000-0000-0000-0000-000000000001]]
+3	[00000000-0000-0001-0000-000000000000]	[00000000-0000-0001-0000-000000000000]	[[00000000-0000-0001-0000-000000000000]]
+
 # Parent and flattened-child offsets remain correct across vector boundaries.
 query IIII
 SELECT COUNT(*), SUM(length(values)), COUNT(*) FILTER (WHERE length(values) = 0),
@@ -328,6 +430,44 @@ SELECT row_id FROM ch.array_types
 WHERE low_cardinality_values = ['low', 'cardinality'];
 ----
 1
+
+# UUID LIST equality, inequality, and IN pushdown use native UUID constants.
+query I
+SELECT row_id FROM ch.array_features
+WHERE nullable_uuid_values = [UUID '00000000-0000-0000-0000-000000000000', NULL,
+                              UUID '00112233-4455-6677-8899-aabbccddeeff',
+                              UUID 'ffffffff-ffff-ffff-ffff-ffffffffffff'];
+----
+2
+
+query I rowsort
+SELECT row_id FROM ch.array_features
+WHERE uuid_values != [UUID '00000000-0000-0001-0000-000000000000'];
+----
+1
+2
+
+query I rowsort
+SELECT row_id FROM ch.array_features
+WHERE uuid_values IN ([], [UUID '00000000-0000-0001-0000-000000000000']);
+----
+1
+3
+
+# Ordered UUID LIST operands are normalized recursively to canonical strings.
+query I rowsort
+SELECT row_id FROM ch.array_features
+WHERE uuid_values < [UUID '00000000-0000-0001-0000-000000000000'];
+----
+1
+2
+
+query I rowsort
+SELECT row_id FROM ch.array_features
+WHERE nested_uuid_values < [[UUID '00000000-0000-0001-0000-000000000000']];
+----
+1
+2
 
 # Native ClickHouse temporal columns retain pre-epoch and fractional ticks.
 # DateTime64 timezone metadata is intentionally exposed as its UTC epoch ticks.
