@@ -9,6 +9,11 @@ mode output_result
 statement ok
 ATTACH 'host=localhost port=9000 database=test_db' AS ch (TYPE clickhouse_scanner);
 
+# Basic scan test - empty table scan
+query I
+SELECT * FROM ch.empty;
+----
+
 # Basic scan test - full table scan
 query IIII rowsort
 SELECT * FROM ch.t1;

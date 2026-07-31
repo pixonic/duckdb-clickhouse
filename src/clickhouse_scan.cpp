@@ -111,9 +111,7 @@ unique_ptr<LocalTableFunctionState> ClickhouseScanFunction::InitLocal(ExecutionC
 	auto local_state = make_uniq<ClickhouseScanLocalState>();
 
 	// Try to get first block
-	if (!GetNextBlock(context.client, *local_state, gstate)) {
-		return nullptr;
-	}
+	GetNextBlock(context.client, *local_state, gstate);
 
 	return local_state;
 }

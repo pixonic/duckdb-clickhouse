@@ -36,7 +36,7 @@ ClickhouseClient::ClickhouseClient(const clickhouse::ClientOptions &opts, size_t
 }
 
 ClickhouseResult ClickhouseClient::Query(const std::string &sql) {
-	// Printer::Print(sql);
+	Printer::Print(sql);
 	auto channel = std::make_shared<BlockChannel>(channel_size);
 	std::thread t(&ClickhouseClient::ExecQuery, this, sql, channel);
 	return ClickhouseResult(channel, std::move(t));

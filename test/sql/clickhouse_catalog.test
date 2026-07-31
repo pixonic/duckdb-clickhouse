@@ -24,6 +24,7 @@ ORDER BY table_name;
 array_features
 array_types
 array_vector_size
+empty
 invalid_datetime64_values
 invalid_time_values
 low_cardinality_types

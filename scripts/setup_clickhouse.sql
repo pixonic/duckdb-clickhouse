@@ -4,6 +4,8 @@ SET enable_time_time64_type = 1;
 DROP DATABASE IF EXISTS test_db;
 CREATE DATABASE test_db;
 
+CREATE TABLE test_db.empty (id UInt64) ENGINE = MergeTree() ORDER BY id;
+
 CREATE TABLE test_db.t1 (
     id UInt64,
     name String,
