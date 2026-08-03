@@ -79,8 +79,7 @@ void ConvertString(clickhouse::ColumnRef ch_column, Vector &output, idx_t offset
 		ConvertStringColumn(ch_fixed_string_col, output, offset, count);
 		return;
 	}
-
-	throw InternalException("Unexpected ClickHouse string column type");
+	throw NotImplementedException("Unexpected ClickHouse VARCHAR column type");
 }
 
 void ConvertUUID(clickhouse::ColumnRef ch_column, Vector &output, idx_t offset, idx_t count) {
@@ -286,8 +285,11 @@ void ConvertLowCardinality(const std::shared_ptr<clickhouse::ColumnLowCardinalit
 
 void ColumnToDuckDB(clickhouse::ColumnRef ch_column, Vector &vector, idx_t offset, idx_t count);
 
-static void ConvertArray(const std::shared_ptr<clickhouse::ColumnArray> &array, Vector &output, idx_t offset,
-                         idx_t count) {
+static void ConvertArray(clickhouse::ColumnRef ch_column, Vector &output, idx_t offset, idx_t count) {
+	auto array = ch_column->As<clickhouse::ColumnArray>();
+	if (!array) {
+		throw InternalException("Unexpected Clickhouse ARRAY column type");
+	}
 	auto source_size = UnsafeNumericCast<idx_t>(array->Size());
 	if (offset > source_size || count > source_size - offset) {
 		throw InternalException("ClickHouse array row range is out of bounds");
@@ -343,15 +345,11 @@ void ColumnToDuckDB(clickhouse::ColumnRef ch_column, Vector &vector, idx_t offse
 	}
 
 	auto type = vector.GetType();
-	auto array = nested_column->As<clickhouse::ColumnArray>();
-	if ((type.id() == LogicalTypeId::LIST) != static_cast<bool>(array)) {
-		throw InternalException("ClickHouse and DuckDB array column types do not match");
-	}
 
 	// Convert based on type
 	switch (type.id()) {
 	case LogicalTypeId::LIST:
-		ConvertArray(array, vector, offset, count);
+		ConvertArray(nested_column, vector, offset, count);
 		break;
 	case LogicalTypeId::BOOLEAN:
 	case LogicalTypeId::UTINYINT:

@@ -20,7 +20,6 @@ static int64_t ParseTemporalPrecision(const string &type, const string &name) {
 	if (!StringUtil::StartsWith(type, prefix) || !StringUtil::EndsWith(type, ")")) {
 		throw InternalException("Invalid ClickHouse %s declaration: %s", name, type);
 	}
-
 	auto precision_start = prefix.size();
 	auto precision_end = type.find(',', precision_start);
 	if (precision_end == string::npos) {
@@ -71,15 +70,13 @@ static LogicalType TypeToLogicalType(const ClickhouseTypeData &input, const stri
 	if (TryUnwrap(type, "LowCardinality", nested_type)) {
 		auto logical_type = TypeToLogicalType(input, nested_type, use_metadata_precision);
 		if (logical_type.id() != LogicalTypeId::VARCHAR) {
-			throw InternalException("Unsupported Clickhouse type: " + type);
+			return LogicalType::INVALID;
 		}
 		return logical_type;
 	}
 	if (TryUnwrap(type, "Array", nested_type)) {
 		return LogicalType::LIST(TypeToLogicalType(input, nested_type, false));
 	}
-
-	// TODO support other types
 
 	if (type == "Date32") {
 		return LogicalType::DATE;
@@ -121,7 +118,7 @@ static LogicalType TypeToLogicalType(const ClickhouseTypeData &input, const stri
 	} else if (type == "String" || IsParameterizedType(type, "FixedString")) {
 		return LogicalType::VARCHAR;
 	} else {
-		throw InternalException("Unsupported Clickhouse type: " + type);
+		return LogicalType::INVALID;
 	}
 }
 
