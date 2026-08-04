@@ -14,7 +14,8 @@ namespace ch = clickhouse;
 
 namespace duckdb {
 
-static void AddColumn(const ch::Block &block, idx_t row_idx, CreateTableInfo &info) {
+static void AddColumn(const ch::Block &block, idx_t row_idx, CreateTableInfo &info,
+                      vector<ClickhouseColumnDefinition> &columns) {
 	auto column_name = string(block[1]->As<ch::ColumnString>()->At(row_idx));
 	auto raw_type = string(block[2]->As<ch::ColumnString>()->At(row_idx));
 	auto raw_default_expr = string(block[3]->As<ch::ColumnString>()->At(row_idx));
@@ -41,9 +42,13 @@ static void AddColumn(const ch::Block &block, idx_t row_idx, CreateTableInfo &in
 		    static_cast<int64_t>(datetime_precision_col->Nested()->As<ch::ColumnUInt64>()->At(row_idx));
 	}
 
-	ClickhouseTypeData type_data {std::move(raw_type), numeric_precision, numeric_scale, datetime_precision};
+	ClickhouseTypeData type_data {raw_type, numeric_precision, numeric_scale, datetime_precision};
 
-	auto column_type = ClickhouseTypes::TypeToLogicalType(type_data);
+	auto column_type_opt = ClickhouseTypes::TypeToLogicalType(type_data);
+	auto column_type = column_type_opt.value_or(LogicalType::BLOB);
+
+	ClickhouseColumnDefinition ch_column {column_name, std::move(raw_type), column_type_opt.has_value()};
+	columns.push_back(std::move(ch_column));
 
 	ColumnDefinition column(std::move(column_name), std::move(column_type));
 	if (!raw_default_expr.empty()) {
@@ -78,7 +83,10 @@ ORDER BY table, position;
 	                                 "${SCHEMA_NAME}", ClickhouseUtils::WriteLiteral(schema.name));
 
 	vector<unique_ptr<CreateTableInfo>> tables;
+	vector<vector<ClickhouseColumnDefinition>> table_columns;
+
 	unique_ptr<CreateTableInfo> info;
+	vector<ClickhouseColumnDefinition> columns;
 
 	auto result = transaction.GetClient().Query(query);
 
@@ -95,19 +103,22 @@ ORDER BY table, position;
 			if (!info || info->table != table_name) {
 				if (info) {
 					tables.push_back(std::move(info));
+					table_columns.push_back(columns);
 				}
 				info = make_uniq<CreateTableInfo>(schema, string(table_name));
+				columns.clear();
 			}
-			AddColumn(block, i, *info);
+			AddColumn(block, i, *info, columns);
 		}
 	}
 
 	if (info) {
 		tables.push_back(std::move(info));
+		table_columns.push_back(columns);
 	}
 
 	for (idx_t i = 0; i < tables.size(); i++) {
-		auto table_entry = make_uniq<ClickhouseTableEntry>(catalog, schema, *tables[i]);
+		auto table_entry = make_uniq<ClickhouseTableEntry>(catalog, schema, *tables[i], table_columns[i]);
 		CreateEntry(std::move(table_entry));
 	}
 }

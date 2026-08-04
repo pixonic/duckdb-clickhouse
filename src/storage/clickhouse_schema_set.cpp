@@ -29,12 +29,10 @@ void ClickhouseSchemaSet::LoadEntries(ClickhouseTransaction &transaction) {
 			std::string name = std::string(view_name);
 
 			if (IsSchemaInternal(name)) {
-				// TODO implement
 				continue;
 			}
 
 			CreateSchemaInfo info;
-			// info.internal = IsSchemaInternal(name);
 			info.internal = false;
 			info.schema = std::move(name);
 

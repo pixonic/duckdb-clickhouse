@@ -4,6 +4,8 @@
 #include <mutex>
 #include <thread>
 
+#include "duckdb/common/exception.hpp"
+
 #include <clickhouse/client.h>
 #include <msd/channel.hpp>
 
@@ -11,7 +13,7 @@ namespace duckdb {
 
 struct ChannelEntry {
 public:
-	ChannelEntry(std::optional<clickhouse::Block> block, std::optional<std::runtime_error> error)
+	ChannelEntry(std::optional<clickhouse::Block> block, std::optional<IOException> error)
 	    : block(std::move(block)), error(std::move(error)) {
 	}
 
@@ -23,13 +25,12 @@ public:
 	}
 
 	static ChannelEntry FromError(const clickhouse::Exception &error) {
-		// TODO fix
-		return ChannelEntry(std::nullopt, std::optional(std::runtime_error(error.display_text)));
+		return ChannelEntry(std::nullopt, std::optional(IOException(error.display_text)));
 	}
 
 public:
 	std::optional<clickhouse::Block> block;
-	std::optional<std::runtime_error> error;
+	std::optional<IOException> error;
 };
 
 using BlockChannel = msd::channel<ChannelEntry>;

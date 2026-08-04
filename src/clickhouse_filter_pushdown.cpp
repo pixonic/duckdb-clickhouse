@@ -201,7 +201,8 @@ string ClickhouseFilterPushdown::TransformFilter(const string &column_name, Tabl
 }
 
 string ClickhouseFilterPushdown::TransformFilters(const vector<column_t> &column_ids,
-                                                  optional_ptr<TableFilterSet> filters, const vector<string> &names) {
+                                                  optional_ptr<TableFilterSet> filters,
+                                                  const ClickhouseTableEntry &table) {
 	if (!filters || filters->filters.empty()) {
 		// no filters
 		return string();
@@ -209,7 +210,7 @@ string ClickhouseFilterPushdown::TransformFilters(const vector<column_t> &column
 	string result;
 	for (auto &entry : filters->filters) {
 		auto column_id = column_ids[entry.first];
-		auto column_name = ClickhouseUtils::WriteIdentifier(names[column_id]);
+		auto column_name = ClickhouseUtils::WriteIdentifier(table.GetClickhouseColumn(column_id).name);
 		auto &filter = *entry.second;
 		auto new_filter = TransformFilter(column_name, filter);
 		if (new_filter.empty()) {

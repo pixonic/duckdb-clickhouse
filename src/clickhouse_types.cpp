@@ -62,67 +62,73 @@ static LogicalType DateTime64ToLogicalType(const ClickhouseTypeData &input, cons
 	return LogicalType::TIMESTAMP_NS;
 }
 
-static LogicalType TypeToLogicalType(const ClickhouseTypeData &input, const string &type, bool use_metadata_precision) {
+static std::optional<LogicalType> TypeToLogicalType(const ClickhouseTypeData &input, const string &type,
+                                                    bool use_metadata_precision) {
 	string nested_type;
 	if (TryUnwrap(type, "Nullable", nested_type)) {
 		return TypeToLogicalType(input, nested_type, use_metadata_precision);
 	}
 	if (TryUnwrap(type, "LowCardinality", nested_type)) {
-		auto logical_type = TypeToLogicalType(input, nested_type, use_metadata_precision);
-		if (logical_type.id() != LogicalTypeId::VARCHAR) {
-			return LogicalType::INVALID;
+		auto logical_type_opt = TypeToLogicalType(input, nested_type, use_metadata_precision);
+		if (!logical_type_opt || logical_type_opt.value().id() != LogicalTypeId::VARCHAR) {
+			return std::nullopt;
 		}
-		return logical_type;
+		return std::optional(logical_type_opt.value());
 	}
 	if (TryUnwrap(type, "Array", nested_type)) {
-		return LogicalType::LIST(TypeToLogicalType(input, nested_type, false));
+		auto child_type = TypeToLogicalType(input, nested_type, false);
+		if (child_type) {
+			return std::optional(LogicalType::LIST(child_type.value()));
+		}
+		return std::nullopt;
 	}
 
 	if (type == "Date32") {
-		return LogicalType::DATE;
+		return std::optional(LogicalType::DATE);
 	} else if (StringUtil::StartsWith(type, "DateTime64(")) {
-		return DateTime64ToLogicalType(input, type, use_metadata_precision);
+		return std::optional(DateTime64ToLogicalType(input, type, use_metadata_precision));
 	} else if (IsParameterizedType(type, "DateTime")) {
-		return LogicalType::TIMESTAMP;
+		return std::optional(LogicalType::TIMESTAMP);
 	} else if (type == "Date") {
-		return LogicalType::DATE;
+		return std::optional(LogicalType::DATE);
 	} else if (type == "Time") {
-		return LogicalType::TIME;
+		return std::optional(LogicalType::TIME);
 	} else if (StringUtil::StartsWith(type, "Time64(")) {
 		auto precision = ParseTemporalPrecision(type, "Time64");
-		return precision <= 6 ? LogicalType::TIME : LogicalType::TIME_NS;
+		auto t = precision <= 6 ? LogicalType::TIME : LogicalType::TIME_NS;
+		return std::optional(t);
 	} else if (type == "Bool") {
-		return LogicalType::BOOLEAN;
+		return std::optional(LogicalType::BOOLEAN);
 	} else if (type == "UInt8") {
-		return LogicalType::UTINYINT;
+		return std::optional(LogicalType::UTINYINT);
 	} else if (type == "Int8") {
-		return LogicalType::TINYINT;
+		return std::optional(LogicalType::TINYINT);
 	} else if (type == "UInt16") {
-		return LogicalType::USMALLINT;
+		return std::optional(LogicalType::USMALLINT);
 	} else if (type == "Int16") {
-		return LogicalType::SMALLINT;
+		return std::optional(LogicalType::SMALLINT);
 	} else if (type == "UInt32") {
-		return LogicalType::UINTEGER;
+		return std::optional(LogicalType::UINTEGER);
 	} else if (type == "Int32") {
-		return LogicalType::INTEGER;
+		return std::optional(LogicalType::INTEGER);
 	} else if (type == "UInt64") {
-		return LogicalType::UBIGINT;
+		return std::optional(LogicalType::UBIGINT);
 	} else if (type == "Int64") {
-		return LogicalType::BIGINT;
+		return std::optional(LogicalType::BIGINT);
 	} else if (type == "Float32") {
-		return LogicalType::FLOAT;
+		return std::optional(LogicalType::FLOAT);
 	} else if (type == "Float64") {
-		return LogicalType::DOUBLE;
+		return std::optional(LogicalType::DOUBLE);
 	} else if (type == "UUID") {
-		return LogicalType::UUID;
+		return std::optional(LogicalType::UUID);
 	} else if (type == "String" || IsParameterizedType(type, "FixedString")) {
-		return LogicalType::VARCHAR;
+		return std::optional(LogicalType::VARCHAR);
 	} else {
-		return LogicalType::INVALID;
+		return std::nullopt;
 	}
 }
 
-LogicalType ClickhouseTypes::TypeToLogicalType(const ClickhouseTypeData &input) {
+std::optional<LogicalType> ClickhouseTypes::TypeToLogicalType(const ClickhouseTypeData &input) {
 	return duckdb::TypeToLogicalType(input, input.type, true);
 }
 

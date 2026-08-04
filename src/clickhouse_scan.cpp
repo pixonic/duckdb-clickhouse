@@ -76,6 +76,12 @@ unique_ptr<GlobalTableFunctionState> ClickhouseScanFunction::InitGlobal(ClientCo
 			select += ", ";
 		}
 		auto col_idx = input.column_ids[i];
+
+		auto &ch_column = table.GetClickhouseColumn(col_idx);
+		if (!ch_column.supported) {
+			throw NotImplementedException("Unsupported column: " + ch_column.name + " of type: " + ch_column.raw_type);
+		}
+
 		auto &col = table.GetColumn(LogicalIndex(col_idx));
 		select += ClickhouseUtils::WriteIdentifier(col.GetName());
 	}
@@ -86,8 +92,7 @@ unique_ptr<GlobalTableFunctionState> ClickhouseScanFunction::InitGlobal(ClientCo
 	select += ClickhouseUtils::WriteIdentifier(table.name);
 
 	// Filter pushdown
-	string filter_string =
-	    ClickhouseFilterPushdown::TransformFilters(input.column_ids, input.filters, bind_data.column_names);
+	string filter_string = ClickhouseFilterPushdown::TransformFilters(input.column_ids, input.filters, table);
 	if (!filter_string.empty()) {
 		select += " WHERE " + filter_string;
 	}

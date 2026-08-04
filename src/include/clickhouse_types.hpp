@@ -18,7 +18,7 @@ struct ClickhouseTypeData {
 
 class ClickhouseTypes {
 public:
-	static LogicalType TypeToLogicalType(const ClickhouseTypeData &input);
+	static std::optional<LogicalType> TypeToLogicalType(const ClickhouseTypeData &input);
 	static bool IsNullable(const ClickhouseTypeData &input);
 };
 

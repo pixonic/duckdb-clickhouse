@@ -7,11 +7,17 @@
 
 namespace duckdb {
 
+struct ClickhouseColumnDefinition {
+public:
+	string name;
+	string raw_type;
+	bool supported;
+};
+
 class ClickhouseTableEntry : public TableCatalogEntry {
 public:
-	ClickhouseTableEntry(Catalog &catalog, SchemaCatalogEntry &schema, CreateTableInfo &info);
-
-	vector<string> source_column_types;
+	ClickhouseTableEntry(Catalog &catalog, SchemaCatalogEntry &schema, CreateTableInfo &info,
+	                     vector<ClickhouseColumnDefinition> columns);
 
 	unique_ptr<BaseStatistics> GetStatistics(ClientContext &context, column_t column_id) override;
 
@@ -21,6 +27,11 @@ public:
 
 	void BindUpdateConstraints(Binder &binder, LogicalGet &get, LogicalProjection &proj, LogicalUpdate &update,
 	                           ClientContext &context) override;
+
+	const ClickhouseColumnDefinition &GetClickhouseColumn(column_t index) const;
+
+private:
+	vector<ClickhouseColumnDefinition> ch_columns;
 };
 
 } // namespace duckdb

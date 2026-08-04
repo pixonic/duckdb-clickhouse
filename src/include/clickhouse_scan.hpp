@@ -16,8 +16,6 @@ struct ClickhouseScanBindData : public FunctionData {
 
 	ClickhouseTableEntry &table;
 
-	vector<string> column_names;
-
 	unique_ptr<FunctionData> Copy() const override;
 	bool Equals(const FunctionData &other_p) const override;
 };
