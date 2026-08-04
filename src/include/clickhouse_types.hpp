@@ -1,5 +1,7 @@
 #pragma once
 
+#include <optional>
+
 #include "duckdb/common/types.hpp"
 #include "duckdb/common/string_util.hpp"
 

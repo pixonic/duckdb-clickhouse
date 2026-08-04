@@ -48,9 +48,12 @@ void ClickhouseClient::ExecQuery(const std::string &sql, std::shared_ptr<BlockCh
 	auto query = clickhouse::Query(sql);
 	query.OnDataCancelable(
 	    [=](const clickhouse::Block &block) { return channel->write(ChannelEntry::FromBlock(block)); });
-	query.OnException([=](const clickhouse::Exception &ex) { channel->write(ChannelEntry::FromError(ex)); });
-
-	client.Select(query);
+	query.OnException([=](const clickhouse::Exception &ex) { channel->write(ChannelEntry::FromChError(ex)); });
+	try {
+		client.Select(query);
+	} catch (const std::exception &error) {
+		channel->write(ChannelEntry::FromStdError(error));
+	}
 	channel->close();
 }
 

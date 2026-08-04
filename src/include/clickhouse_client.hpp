@@ -24,8 +24,12 @@ public:
 		return ChannelEntry(std::optional(block), std::nullopt);
 	}
 
-	static ChannelEntry FromError(const clickhouse::Exception &error) {
+	static ChannelEntry FromChError(const clickhouse::Exception &error) {
 		return ChannelEntry(std::nullopt, std::optional(IOException(error.display_text)));
+	}
+
+	static ChannelEntry FromStdError(const std::exception &error) {
+		return ChannelEntry(std::nullopt, std::optional(IOException(error.what())));
 	}
 
 public:
