@@ -1,5 +1,7 @@
 #include "clickhouse_types.hpp"
 
+#include "duckdb/common/exception/conversion_exception.hpp"
+
 namespace duckdb {
 
 static bool TryUnwrap(const string &type, const string &wrapper, string &nested_type) {
@@ -18,7 +20,7 @@ static bool IsParameterizedType(const string &type, const string &name) {
 static int64_t ParseTemporalPrecision(const string &type, const string &name) {
 	auto prefix = name + "(";
 	if (!StringUtil::StartsWith(type, prefix) || !StringUtil::EndsWith(type, ")")) {
-		throw InternalException("Invalid ClickHouse %s declaration: %s", name, type);
+		throw ConversionException("Invalid ClickHouse %s declaration: %s", name, type);
 	}
 	auto precision_start = prefix.size();
 	auto precision_end = type.find(',', precision_start);
@@ -26,18 +28,18 @@ static int64_t ParseTemporalPrecision(const string &type, const string &name) {
 		precision_end = type.size() - 1;
 	}
 	if (precision_start == precision_end) {
-		throw InternalException("Invalid ClickHouse %s declaration: %s", name, type);
+		throw ConversionException("Invalid ClickHouse %s declaration: %s", name, type);
 	}
 
 	int64_t precision = 0;
 	for (auto i = precision_start; i < precision_end; i++) {
 		if (type[i] < '0' || type[i] > '9') {
-			throw InternalException("Invalid ClickHouse %s precision in declaration: %s", name, type);
+			throw ConversionException("Invalid ClickHouse %s precision in declaration: %s", name, type);
 		}
 		precision = precision * 10 + type[i] - '0';
 	}
 	if (precision < 0 || precision > 9) {
-		throw InternalException("Unsupported ClickHouse %s precision %d", name, precision);
+		throw ConversionException("Unsupported ClickHouse %s precision %d", name, precision);
 	}
 	return precision;
 }
@@ -49,7 +51,8 @@ static LogicalType DateTime64ToLogicalType(const ClickhouseTypeData &input, cons
 	if (precision < 0) {
 		precision = declaration_precision;
 	} else if (precision != declaration_precision) {
-		throw InternalException("ClickHouse DateTime64 precision metadata does not match declaration: %s", input.type);
+		throw ConversionException("ClickHouse DateTime64 precision metadata does not match declaration: %s",
+		                          input.type);
 	}
 
 	if (precision == 0) {

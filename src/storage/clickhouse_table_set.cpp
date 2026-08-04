@@ -53,10 +53,9 @@ static void AddColumn(const ch::Block &block, idx_t row_idx, CreateTableInfo &in
 	ColumnDefinition column(std::move(column_name), std::move(column_type));
 	if (!raw_default_expr.empty()) {
 		auto expressions = Parser::ParseExpressionList(raw_default_expr);
-		if (expressions.empty()) {
-			throw InternalException("Expression list is empty");
+		if (!expressions.empty()) {
+			column.SetDefaultValue(std::move(expressions[0]));
 		}
-		column.SetDefaultValue(std::move(expressions[0]));
 	}
 
 	auto nullable = ClickhouseTypes::IsNullable(type_data);

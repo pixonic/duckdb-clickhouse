@@ -37,9 +37,6 @@ void ClickhouseCatalogSet::TryLoadEntries(ClickhouseTransaction &transaction) {
 optional_ptr<CatalogEntry> ClickhouseCatalogSet::CreateEntry(unique_ptr<CatalogEntry> entry) {
 	lock_guard<mutex> l(entry_lock);
 	auto result = entry.get();
-	if (result->name.empty()) {
-		throw InternalException("MySQLCatalogSet::CreateEntry called with empty name");
-	}
 	entries.insert(make_pair(result->name, std::move(entry)));
 	return result;
 }

@@ -261,6 +261,12 @@ FROM ch.vector_size;
 ----
 2049	31666
 
+# simple count() without fields
+query I
+SELECT COUNT(*) FROM ch.vector_size;
+----
+4097
+
 # LowCardinality strings remain correct through dictionary-vector execution.
 query IIII
 SELECT COUNT(*), COUNT(DISTINCT category),

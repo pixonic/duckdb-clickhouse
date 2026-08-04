@@ -196,7 +196,7 @@ string ClickhouseFilterPushdown::TransformFilter(const string &column_name, Tabl
 		return column_expression + " IN (" + in_list + ")";
 	}
 	default:
-		throw InternalException("Unsupported table filter type");
+		throw NotImplementedException("Unsupported table filter type");
 	}
 }
 

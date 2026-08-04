@@ -27,7 +27,7 @@ void ConvertValidity(clickhouse::ColumnNullable *nullable, Vector &output, idx_t
 	auto &validity = FlatVector::Validity(output);
 	auto nulls = nullable->Nulls()->As<clickhouse::ColumnUInt8>();
 	if (!nulls) {
-		throw InternalException("Unexpected ClickHouse null-map column type");
+		throw ConversionException("Unexpected ClickHouse null-map column type");
 	}
 	auto &null_data = nulls->GetWritableData();
 	D_ASSERT(offset + count <= null_data.size());
@@ -42,7 +42,7 @@ template <typename TYPE>
 void ConvertDirect(clickhouse::ColumnRef ch_column, Vector &output, idx_t offset, idx_t count) {
 	auto ch_typed = ch_column->As<clickhouse::ColumnVector<TYPE>>();
 	if (!ch_typed) {
-		throw InternalException("Unexpected ClickHouse column type for zero-copy conversion");
+		throw ConversionException("Unexpected ClickHouse column type for zero-copy conversion");
 	}
 
 	auto &ch_data = ch_typed->GetWritableData();
@@ -85,7 +85,7 @@ void ConvertString(clickhouse::ColumnRef ch_column, Vector &output, idx_t offset
 void ConvertUUID(clickhouse::ColumnRef ch_column, Vector &output, idx_t offset, idx_t count) {
 	auto ch_uuid = ch_column->As<clickhouse::ColumnUUID>();
 	if (!ch_uuid) {
-		throw InternalException("Unexpected ClickHouse UUID column type");
+		throw ConversionException("Unexpected ClickHouse UUID column type");
 	}
 
 	auto result_data = FlatVector::GetData<hugeint_t>(output);
@@ -116,7 +116,7 @@ void ConvertDate(clickhouse::ColumnRef ch_column, Vector &output, idx_t offset, 
 		return;
 	}
 
-	throw InternalException("Unexpected ClickHouse date column type");
+	throw ConversionException("Unexpected ClickHouse date column type");
 }
 
 static int64_t PowerOfTen(idx_t exponent) {
@@ -129,7 +129,8 @@ static int64_t PowerOfTen(idx_t exponent) {
 static int64_t ScaleTemporalTicks(int64_t value, idx_t source_precision, idx_t target_precision,
                                   const string &source_type, const LogicalType &target_type) {
 	if (source_precision > target_precision) {
-		throw InternalException("Cannot exactly scale ClickHouse %s to DuckDB %s", source_type, target_type.ToString());
+		throw ConversionException("Cannot exactly scale ClickHouse %s to DuckDB %s", source_type,
+		                          target_type.ToString());
 	}
 
 	int64_t result;
@@ -161,8 +162,8 @@ void ConvertTimestamp(clickhouse::ColumnRef ch_column, Vector &output, idx_t off
 	auto ch_datetime = ch_column->As<clickhouse::ColumnDateTime>();
 	if (ch_datetime) {
 		if (output.GetType().id() != LogicalTypeId::TIMESTAMP) {
-			throw InternalException("Unexpected DuckDB type for ClickHouse DateTime conversion: " +
-			                        output.GetType().ToString());
+			throw ConversionException("Unexpected DuckDB type for ClickHouse DateTime conversion: " +
+			                          output.GetType().ToString());
 		}
 		auto result_data = FlatVector::GetData<timestamp_t>(output);
 		for (idx_t i = 0; i < count; i++) {
@@ -176,7 +177,7 @@ void ConvertTimestamp(clickhouse::ColumnRef ch_column, Vector &output, idx_t off
 
 	auto ch_datetime64 = ch_column->As<clickhouse::ColumnDateTime64>();
 	if (!ch_datetime64) {
-		throw InternalException("Unexpected ClickHouse timestamp column type");
+		throw ConversionException("Unexpected ClickHouse timestamp column type");
 	}
 
 	switch (output.GetType().id()) {
@@ -193,7 +194,7 @@ void ConvertTimestamp(clickhouse::ColumnRef ch_column, Vector &output, idx_t off
 		ConvertDateTime64<timestamp_ns_t>(ch_datetime64, output, offset, count, 9);
 		break;
 	default:
-		throw InternalException("Unexpected DuckDB timestamp type: " + output.GetType().ToString());
+		throw ConversionException("Unexpected DuckDB timestamp type: " + output.GetType().ToString());
 	}
 }
 
@@ -210,7 +211,7 @@ void ConvertTime(clickhouse::ColumnRef ch_column, Vector &output, idx_t offset, 
 		source_precision = ch_time64->GetPrecision();
 		source_type = ch_time64->Type()->GetName();
 	} else {
-		throw InternalException("Unexpected ClickHouse time column type");
+		throw ConversionException("Unexpected ClickHouse time column type");
 	}
 
 	auto max_source_ticks = Interval::SECS_PER_DAY * PowerOfTen(source_precision);
@@ -242,7 +243,7 @@ bool ConvertLowCardinalityIndexes(clickhouse::ColumnRef index_column, SelectionV
 	for (idx_t i = 0; i < count; i++) {
 		auto dictionary_index = static_cast<uint64_t>(indexes[offset + i]);
 		if (dictionary_index >= dictionary_size || dictionary_index > std::numeric_limits<sel_t>::max()) {
-			throw InternalException("Invalid ClickHouse LowCardinality dictionary index");
+			throw ConversionException("Invalid ClickHouse LowCardinality dictionary index");
 		}
 		selection.set_index(i, static_cast<sel_t>(dictionary_index));
 	}
@@ -255,7 +256,9 @@ void ConvertLowCardinality(const std::shared_ptr<clickhouse::ColumnLowCardinalit
 	auto dictionary_column = low_cardinality->GetDictionaryColumn();
 	auto dictionary_values = dictionary_column;
 
-	auto *nullable_dictionary = dynamic_cast<clickhouse::ColumnNullable *>(dictionary_column.get());
+	// auto *nullable_dictionary = dynamic_cast<clickhouse::ColumnNullable *>(dictionary_column.get());
+	auto nullable_dictionary = dictionary_column->As<clickhouse::ColumnNullable>();
+
 	if (nullable_dictionary) {
 		dictionary_values = nullable_dictionary->Nested();
 	}
@@ -267,7 +270,7 @@ void ConvertLowCardinality(const std::shared_ptr<clickhouse::ColumnLowCardinalit
 	Vector dictionary(output.GetType(), dictionary_size);
 	ConvertString(dictionary_values, dictionary, 0, dictionary_size);
 	if (nullable_dictionary) {
-		ConvertValidity(nullable_dictionary, dictionary, 0, dictionary_size);
+		ConvertValidity(nullable_dictionary.get(), dictionary, 0, dictionary_size);
 	}
 
 	SelectionVector selection(count);
@@ -277,7 +280,7 @@ void ConvertLowCardinality(const std::shared_ptr<clickhouse::ColumnLowCardinalit
 	                 ConvertLowCardinalityIndexes<uint32_t>(index_column, selection, offset, count, dictionary_size) ||
 	                 ConvertLowCardinalityIndexes<uint64_t>(index_column, selection, offset, count, dictionary_size);
 	if (!converted) {
-		throw InternalException("Unexpected ClickHouse LowCardinality index column type");
+		throw ConversionException("Unexpected ClickHouse LowCardinality index column type");
 	}
 
 	output.Dictionary(dictionary, dictionary_size, selection, count);
@@ -288,18 +291,18 @@ void ColumnToDuckDB(clickhouse::ColumnRef ch_column, Vector &vector, idx_t offse
 static void ConvertArray(clickhouse::ColumnRef ch_column, Vector &output, idx_t offset, idx_t count) {
 	auto array = ch_column->As<clickhouse::ColumnArray>();
 	if (!array) {
-		throw InternalException("Unexpected Clickhouse ARRAY column type");
+		throw ConversionException("Unexpected Clickhouse ARRAY column type");
 	}
 	auto source_size = UnsafeNumericCast<idx_t>(array->Size());
 	if (offset > source_size || count > source_size - offset) {
-		throw InternalException("ClickHouse array row range is out of bounds");
+		throw ConversionException("ClickHouse array row range is out of bounds");
 	}
 
 	auto data_column = array->GetData();
 	auto data_size = UnsafeNumericCast<idx_t>(data_column->Size());
 	auto child_offset = count == 0 ? 0 : UnsafeNumericCast<idx_t>(array->GetOffset(offset));
 	if (child_offset > data_size) {
-		throw InternalException("ClickHouse array child offset is out of bounds");
+		throw ConversionException("ClickHouse array child offset is out of bounds");
 	}
 
 	auto result_data = FlatVector::GetData<list_entry_t>(output);
@@ -308,7 +311,7 @@ static void ConvertArray(clickhouse::ColumnRef ch_column, Vector &output, idx_t 
 		auto row_offset = UnsafeNumericCast<idx_t>(array->GetOffset(offset + i));
 		auto row_count = UnsafeNumericCast<idx_t>(array->GetSize(offset + i));
 		if (row_offset > data_size || row_offset != child_offset + child_count || row_count > data_size - row_offset) {
-			throw InternalException("Invalid ClickHouse array offsets");
+			throw ConversionException("Invalid ClickHouse array offsets");
 		}
 		result_data[i].offset = child_count;
 		result_data[i].length = row_count;
@@ -337,11 +340,16 @@ void ColumnToDuckDB(clickhouse::ColumnRef ch_column, Vector &vector, idx_t offse
 		return;
 	}
 
-	auto *nullable = dynamic_cast<clickhouse::ColumnNullable *>(ch_column.get());
+	auto nullable = ch_column->As<clickhouse::ColumnNullable>();
 	auto nested_column = ch_column;
 	if (nullable) {
 		nested_column = nullable->Nested();
-		ConvertValidity(nullable, vector, offset, count);
+		ConvertValidity(nullable.get(), vector, offset, count);
+	}
+
+	auto nothing = nested_column->As<clickhouse::ColumnNothing>();
+	if (nothing) {
+		return;
 	}
 
 	auto type = vector.GetType();

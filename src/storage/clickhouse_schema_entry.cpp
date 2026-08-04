@@ -77,9 +77,7 @@ void ClickhouseSchemaEntry::DropEntry(ClientContext &context, DropInfo &info) {
 
 bool ClickhouseSchemaEntry::CatalogTypeIsSupported(CatalogType type) {
 	switch (type) {
-	// case CatalogType::INDEX_ENTRY:
 	case CatalogType::TABLE_ENTRY:
-		// case CatalogType::VIEW_ENTRY:
 		return true;
 	default:
 		return false;
@@ -89,10 +87,7 @@ bool ClickhouseSchemaEntry::CatalogTypeIsSupported(CatalogType type) {
 ClickhouseCatalogSet &ClickhouseSchemaEntry::GetCatalogSet(CatalogType type) {
 	switch (type) {
 	case CatalogType::TABLE_ENTRY:
-		// case CatalogType::VIEW_ENTRY:
 		return tables;
-	// case CatalogType::INDEX_ENTRY:
-	// return indexes;
 	default:
 		throw InternalException("Type not supported for GetCatalogSet");
 	}
