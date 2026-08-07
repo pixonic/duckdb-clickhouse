@@ -30,7 +30,7 @@ void ClickhouseTableEntry::BindUpdateConstraints(Binder &binder, LogicalGet &get
 
 const ClickhouseColumnDefinition &ClickhouseTableEntry::GetClickhouseColumn(column_t index) const {
 	if (index >= ch_columns.size()) {
-		throw InternalException("Clikchouse column index %lld out of range", index);
+		throw InternalException("Clickhouse column index %lld out of range", index);
 	}
 	return ch_columns[index];
 }

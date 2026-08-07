@@ -23,7 +23,6 @@ protected:
 private:
 	mutex entry_lock;
 	unordered_map<string, shared_ptr<CatalogEntry>> entries;
-	case_insensitive_map_t<string> entry_map;
 	atomic<bool> is_loaded;
 };
 

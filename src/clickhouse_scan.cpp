@@ -1,10 +1,12 @@
 #include "clickhouse_scan.hpp"
 #include "clickhouse_filter_pushdown.hpp"
 #include "clickhouse_utils.hpp"
+
+#include "duckdb/main/database.hpp"
 #include "duckdb/main/database_manager.hpp"
 #include "duckdb/main/attached_database.hpp"
-#include "duckdb/common/limits.hpp"
 
+#include "duckdb/common/limits.hpp"
 #include "duckdb/common/printer.hpp"
 
 // Forward declarations to avoid circular includes
@@ -36,8 +38,7 @@ bool ClickhouseScanBindData::Equals(const FunctionData &other_p) const {
 
 idx_t ClickhouseScanGlobalState::MaxThreads() const {
 	// Support multi-threaded scanning
-	// return 8;
-	return 1;
+	return max_threads;
 }
 
 //===--------------------------------------------------------------------===//
@@ -100,12 +101,14 @@ unique_ptr<GlobalTableFunctionState> ClickhouseScanFunction::InitGlobal(ClientCo
 		select += " WHERE " + filter_string;
 	}
 
+	auto max_threads = context.db->NumberOfThreads();
+
 	// Execute query
 	auto &transaction = ClickhouseTransaction::Get(context, table.catalog);
 	auto &client = transaction.GetClient();
 	auto result = make_uniq<ClickhouseResult>(client.Query(select));
 
-	return make_uniq<ClickhouseScanGlobalState>(std::move(result));
+	return make_uniq<ClickhouseScanGlobalState>(std::move(result), max_threads);
 }
 
 //===--------------------------------------------------------------------===//
@@ -167,7 +170,6 @@ bool ClickhouseScanFunction::GetNextBlock(ClientContext &context, ClickhouseScan
 void ClickhouseScanFunction::Scan(ClientContext &context, TableFunctionInput &data, DataChunk &output) {
 	auto &gstate = data.global_state->Cast<ClickhouseScanGlobalState>();
 	auto &lstate = data.local_state->Cast<ClickhouseScanLocalState>();
-	auto &bind_data = data.bind_data->Cast<ClickhouseScanBindData>();
 
 	if (!lstate.current_block.has_value()) {
 		return;
