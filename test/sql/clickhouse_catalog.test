@@ -1,0 +1,196 @@
+# name: test/sql/clickhouse_catalog.test
+# description: Test ClickHouse catalog observability and type mappings
+# group: [sql]
+
+require clickhouse_scanner
+
+mode output_result
+
+statement ok
+ATTACH 'host=localhost port=9000 database=test_db' AS ch (TYPE clickhouse_scanner);
+
+query I
+SHOW DATABASES;
+----
+ch
+memory
+
+query I
+SELECT table_name
+FROM duckdb_tables()
+WHERE database_name = 'ch'
+ORDER BY table_name;
+----
+array_features
+array_types
+array_vector_size
+empty
+invalid_datetime64_values
+invalid_time_values
+low_cardinality_types
+nullable_types
+supported_types
+t1
+temporal_precision_types
+temporal_values
+uuid_types
+vector_size
+
+# Verify every supported ClickHouse type is exposed as the intended DuckDB type.
+query III
+SELECT column_name, data_type, is_nullable
+FROM duckdb_columns()
+WHERE database_name = 'ch' AND table_name = 'supported_types'
+ORDER BY column_index;
+----
+bool_value	BOOLEAN	false
+uint8_value	UTINYINT	false
+int8_value	TINYINT	false
+uint16_value	USMALLINT	false
+int16_value	SMALLINT	false
+uint32_value	UINTEGER	false
+int32_value	INTEGER	false
+uint64_value	UBIGINT	false
+int64_value	BIGINT	false
+float32_value	FLOAT	false
+float64_value	DOUBLE	false
+string_value	VARCHAR	false
+fixed_string_value	VARCHAR	false
+date_value	DATE	false
+datetime_value	TIMESTAMP	false
+
+# DateTime64 and Time64 precision determines the exposed DuckDB unit.
+query II
+SELECT column_name, data_type
+FROM duckdb_columns()
+WHERE database_name = 'ch' AND table_name = 'temporal_precision_types'
+ORDER BY column_index;
+----
+datetime64_0	TIMESTAMP_S
+datetime64_1	TIMESTAMP_MS
+datetime64_2	TIMESTAMP_MS
+datetime64_3	TIMESTAMP_MS
+datetime64_4	TIMESTAMP
+datetime64_5	TIMESTAMP
+datetime64_6	TIMESTAMP
+datetime64_7	TIMESTAMP_NS
+datetime64_8	TIMESTAMP_NS
+datetime64_9	TIMESTAMP_NS
+time_value	TIME
+time64_0	TIME
+time64_1	TIME
+time64_2	TIME
+time64_3	TIME
+time64_4	TIME
+time64_5	TIME
+time64_6	TIME
+time64_7	TIME_NS
+time64_8	TIME_NS
+time64_9	TIME_NS
+
+# Temporal mappings and nullability work through Nullable wrappers.
+query III
+SELECT column_name, data_type, is_nullable
+FROM duckdb_columns()
+WHERE database_name = 'ch' AND table_name = 'temporal_values'
+  AND column_name IN ('date32_value', 'nullable_date32', 'nullable_datetime64', 'nullable_time64')
+ORDER BY column_index;
+----
+date32_value	DATE	false
+nullable_date32	DATE	true
+nullable_datetime64	TIMESTAMP_NS	true
+nullable_time64	TIME_NS	true
+
+# Nullable ClickHouse columns must remain nullable in the DuckDB catalog.
+query III
+SELECT column_name, data_type, is_nullable
+FROM duckdb_columns()
+WHERE database_name = 'ch' AND table_name = 'nullable_types'
+  AND column_name IN ('row_id', 'bool_value', 'uint64_value', 'fixed_string_value', 'datetime_value')
+ORDER BY column_index;
+----
+row_id	UTINYINT	false
+bool_value	BOOLEAN	true
+uint64_value	UBIGINT	true
+fixed_string_value	VARCHAR	true
+datetime_value	TIMESTAMP	true
+
+# UUID maps to DuckDB's native UUID type through Nullable wrappers.
+query III
+SELECT column_name, data_type, is_nullable
+FROM duckdb_columns()
+WHERE database_name = 'ch' AND table_name = 'uuid_types'
+ORDER BY column_index;
+----
+row_id	UTINYINT	false
+uuid_value	UUID	false
+nullable_uuid	UUID	true
+
+# LowCardinality wrappers preserve the nested DuckDB type and nullability.
+query III
+SELECT column_name, data_type, is_nullable
+FROM duckdb_columns()
+WHERE database_name = 'ch' AND table_name = 'low_cardinality_types'
+ORDER BY column_index;
+----
+row_id	UBIGINT	false
+category	VARCHAR	false
+nullable_category	VARCHAR	true
+
+# Array wrappers map recursively to DuckDB LIST, without making the
+# parent nullable when only the elements are Nullable.
+query III
+SELECT column_name, data_type, is_nullable
+FROM duckdb_columns()
+WHERE database_name = 'ch' AND table_name = 'array_features'
+ORDER BY column_index;
+----
+row_id	UTINYINT	false
+nullable_values	INTEGER[]	false
+nested_values	VARCHAR[][]	false
+fixed_values	VARCHAR[]	false
+date_values	DATE[]	false
+datetime_values	TIMESTAMP_NS[]	false
+uuid_values	UUID[]	false
+nullable_uuid_values	UUID[]	false
+nested_uuid_values	UUID[][]	false
+
+# UUID conversion also preserves top-level nullability in the vector-boundary fixture.
+query III
+SELECT column_name, data_type, is_nullable
+FROM duckdb_columns()
+WHERE database_name = 'ch' AND table_name = 'vector_size'
+  AND column_name IN ('uuid_value', 'nullable_uuid')
+ORDER BY column_index;
+----
+uuid_value	UUID	false
+nullable_uuid	UUID	true
+
+query II
+SELECT column_name, data_type
+FROM duckdb_columns()
+WHERE database_name = 'ch' AND table_name = 'array_types'
+  AND column_name IN ('bool_values', 'uint64_values', 'float64_values',
+                      'date32_values', 'datetime64_values', 'time64_values',
+                      'low_cardinality_values', 'nullable_low_cardinality_values')
+ORDER BY column_index;
+----
+bool_values	BOOLEAN[]
+uint64_values	UBIGINT[]
+float64_values	DOUBLE[]
+date32_values	DATE[]
+datetime64_values	TIMESTAMP_NS[]
+time64_values	TIME_NS[]
+low_cardinality_values	VARCHAR[]
+nullable_low_cardinality_values	VARCHAR[]
+
+statement ok
+USE ch;
+
+query IIIIII
+DESCRIBE t1;
+----
+id	UBIGINT	YES	NULL	NULL	NULL
+name	VARCHAR	YES	NULL	NULL	NULL
+value	DOUBLE	YES	NULL	NULL	NULL
+created_at	TIMESTAMP	YES	NULL	NULL	NULL

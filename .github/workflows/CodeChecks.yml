@@ -1,0 +1,236 @@
+name: CodeChecks
+on:
+  workflow_call:
+    inputs:
+      explicit_checks:
+        type: string
+        required: false
+      extension_name:
+        type: string
+        required: true
+      override_repository:
+        type: string
+        required: false
+      override_ref:
+        type: string
+        required: false
+      duckdb_version:
+        type: string
+        required: true
+      override_ci_tools_repository:
+        type: string
+        required: false
+        default: "duckdb/extension-ci-tools"
+      ci_tools_version:
+        type: string
+        required: true
+      extra_toolchains:
+        type: string
+        required: false
+      # format_checks:
+      #   type: string
+      #   required: false
+      #   default: "format;tidy"
+      # Override the default vcpkg repository
+      vcpkg_url:
+        required: false
+        type: string
+        default: "https://github.com/microsoft/vcpkg.git"
+      # Override the default vcpkg commit used by this version of DuckDB
+      vcpkg_commit:
+        required: false
+        type: string
+        default: "ce613c41372b23b1f51333815feb3edd87ef8a8b"
+    secrets:
+      GH_TOKEN:
+        required: false
+  repository_dispatch:
+  merge_group:
+  pull_request:
+    types: [opened, reopened]
+    paths-ignore:
+      - '**.md'
+      - '.github/workflows/**'
+
+env:
+  GH_TOKEN: ${{ secrets.GH_TOKEN }}
+
+jobs:
+  format-check:
+    name: Format Check
+    runs-on: ubuntu-22.04
+
+    env:
+      CC: gcc-10
+      CXX: g++-10
+      GEN: ninja
+
+    steps:
+      - uses: actions/checkout@v4
+        name: Checkout override repository
+        if: ${{inputs.override_repository != ''}}
+        with:
+          repository: ${{ inputs.override_repository }}
+          ref: ${{ inputs.override_ref }}
+          fetch-depth: 0
+          submodules: 'recursive'
+
+      - uses: actions/checkout@v4
+        name: Checkout current repository
+        if: ${{inputs.override_repository == ''}}
+        with:
+          fetch-depth: 0
+          submodules: 'recursive'
+
+      - uses: actions/checkout@v4
+        name: Checkout Extension CI tools
+        with:
+          path: 'extension-ci-tools'
+          ref: ${{ inputs.ci_tools_version }}
+          repository: ${{ inputs.override_ci_tools_repository }}
+
+      - name: Install
+        shell: bash
+        run: sudo apt-get update -y -qq && sudo apt-get install -y -qq ninja-build clang-format-11 && sudo pip3 install cmake-format 'black==24.*' cxxheaderparser pcpp 'clang_format==11.0.1'
+
+      - name: List Installed Packages
+        shell: bash
+        run: pip3 freeze
+
+      - name: Format Check
+        shell: bash
+        run: |
+          clang-format --version
+          clang-format --dump-config
+          black --version
+          make format-check
+
+  tidy-check:
+    name: Tidy Check
+    runs-on: ubuntu-24.04
+
+    env:
+      CC: gcc
+      CXX: g++
+      GEN: ninja
+      TIDY_THREADS: 4
+      TIDY_CHECKS: ${{ inputs.explicit_checks && inputs.explicit_checks || '' }}
+      VCPKG_TOOLCHAIN_PATH: ${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake
+
+    steps:
+      - uses: actions/checkout@v4
+        name: Checkout override repository
+        if: ${{inputs.override_repository != ''}}
+        with:
+          repository: ${{ inputs.override_repository }}
+          ref: ${{ inputs.override_ref }}
+          fetch-depth: 0
+          submodules: 'recursive'
+
+      - uses: actions/checkout@v4
+        name: Checkout current repository
+        if: ${{inputs.override_repository == ''}}
+        with:
+          fetch-depth: 0
+          submodules: 'recursive'
+
+      - uses: actions/checkout@v4
+        name: Checkout Extension CI tools
+        with:
+          path: 'extension-ci-tools'
+          ref: ${{ inputs.ci_tools_version }}
+          repository: ${{ inputs.override_ci_tools_repository }}
+
+      - name: Install
+        shell: bash
+        run: sudo apt-get update -y -qq && sudo apt-get install -y -qq ninja-build clang-tidy && sudo pip3 install pybind11[global] --break-system-packages
+
+      - name: Setup vcpkg
+        uses: lukka/run-vcpkg@v11.1
+        with:
+          vcpkgGitCommitId: ${{ inputs.vcpkg_commit }}
+          vcpkgGitURL: ${{ inputs.vcpkg_url }}
+
+      - name: Tidy Check Diff
+        shell: bash
+        run: make tidy-check-fixed
+
+  sqllogic-test:
+    name: SqlLogic Test
+    runs-on: ubuntu-24.04
+
+    env:
+      CC: gcc
+      CXX: g++
+      GEN: ninja
+      VCPKG_TOOLCHAIN_PATH: ${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake
+
+    steps:
+      - uses: actions/checkout@v4
+        name: Checkout override repository
+        if: ${{inputs.override_repository != ''}}
+        with:
+          repository: ${{ inputs.override_repository }}
+          ref: ${{ inputs.override_ref }}
+          fetch-depth: 0
+          submodules: 'recursive'
+
+      - uses: actions/checkout@v4
+        name: Checkout current repository
+        if: ${{inputs.override_repository == ''}}
+        with:
+          fetch-depth: 0
+          submodules: 'recursive'
+
+      - uses: actions/checkout@v4
+        name: Checkout Extension CI tools
+        with:
+          path: 'extension-ci-tools'
+          ref: ${{ inputs.ci_tools_version }}
+          repository: ${{ inputs.override_ci_tools_repository }}
+
+      - name: Install dependencies
+        shell: bash
+        run: sudo apt-get update -y -qq && sudo apt-get install -y -qq ninja-build clang-tidy && sudo pip3 install pybind11[global] --break-system-packages
+
+      - name: Setup vcpkg
+        uses: lukka/run-vcpkg@v11.1
+        with:
+          vcpkgGitCommitId: ${{ inputs.vcpkg_commit }}
+          vcpkgGitURL: ${{ inputs.vcpkg_url }}
+
+      - name: Build
+        shell: bash
+        run: make release
+
+      - name: Install clickhouse
+        shell: bash
+        run: |
+          # Install prerequisite packages
+          sudo apt-get install -y apt-transport-https ca-certificates curl gnupg
+
+          # Download the ClickHouse GPG key and store it in the keyring
+          curl -fsSL 'https://packages.clickhouse.com/rpm/lts/repodata/repomd.xml.key' | sudo gpg --dearmor -o /usr/share/keyrings/clickhouse-keyring.gpg
+
+          # Get the system architecture
+          ARCH=$(dpkg --print-architecture)
+
+          # Add the ClickHouse repository to apt sources
+          echo "deb [signed-by=/usr/share/keyrings/clickhouse-keyring.gpg arch=${ARCH}] https://packages.clickhouse.com/deb stable main" | sudo tee /etc/apt/sources.list.d/clickhouse.list
+
+          # Update apt package lists
+          sudo apt-get update
+
+          sudo apt-get install -y clickhouse-server clickhouse-client
+
+      - name: Run clickhouse
+        shell: bash
+        run: sudo service clickhouse-server start
+
+      - name: Init clickhouse data
+        shell: bash
+        run: clickhouse-client --queries-file scripts/setup_clickhouse.sql
+
+      - name: Run tests
+        shell: bash
+        run: make test
