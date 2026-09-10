@@ -1,5 +1,6 @@
 #pragma once
 
+#include <chrono>
 #include <string>
 #include <mutex>
 #include <thread>
@@ -66,6 +67,7 @@ private:
 	void ExecQuery(const std::string &sql, std::shared_ptr<BlockChannel> channel);
 
 private:
+	std::chrono::steady_clock::duration socket_read_duration {};
 	clickhouse::Client client;
 	std::mutex lock;
 	size_t channel_size;
