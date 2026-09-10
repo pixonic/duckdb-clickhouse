@@ -95,6 +95,13 @@ unique_ptr<GlobalTableFunctionState> ClickhouseScanFunction::InitGlobal(ClientCo
 	select += ".";
 	select += ClickhouseUtils::WriteIdentifier(table.name);
 
+	if (input.filters) {
+		for (auto &e : input.filters->filters) {
+			auto f_str = e.second->DebugToString();
+			Printer::Print(f_str);
+		}
+	}
+
 	// Filter pushdown
 	string filter_string = ClickhouseFilterPushdown::TransformFilters(input.column_ids, input.filters, table);
 	if (!filter_string.empty()) {
