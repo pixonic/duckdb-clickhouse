@@ -11,7 +11,7 @@ ATTACH 'host=localhost port=9000 database=test_db' AS ch (TYPE clickhouse_scanne
 
 # Basic scan test - empty table scan
 query I
-SELECT * FROM ch.empty;
+EXPLAIN ANALYZE SELECT * FROM ch.empty;
 ----
 
 # Basic scan test - full table scan

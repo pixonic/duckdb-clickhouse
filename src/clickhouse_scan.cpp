@@ -95,14 +95,6 @@ unique_ptr<GlobalTableFunctionState> ClickhouseScanFunction::InitGlobal(ClientCo
 	select += ".";
 	select += ClickhouseUtils::WriteIdentifier(table.name);
 
-	// TODO remove
-	if (input.filters) {
-		for (auto &e : input.filters->filters) {
-			auto f_str = e.second->DebugToString();
-			Printer::Print(f_str);
-		}
-	}
-
 	// Filter pushdown
 	string filter_string = ClickhouseFilterPushdown::TransformFilters(input.column_ids, input.filters, table);
 	if (!filter_string.empty()) {
@@ -116,7 +108,7 @@ unique_ptr<GlobalTableFunctionState> ClickhouseScanFunction::InitGlobal(ClientCo
 	auto client = transaction.NewClient();
 	auto result = make_uniq<ClickhouseResult>(client->Query(select));
 
-	return make_uniq<ClickhouseScanGlobalState>(std::move(client), std::move(result), max_threads);
+	return make_uniq<ClickhouseScanGlobalState>(std::move(client), std::move(result), std::move(select), max_threads);
 }
 
 //===--------------------------------------------------------------------===//
@@ -213,12 +205,15 @@ void ClickhouseScanFunction::Scan(ClientContext &context, TableFunctionInput &da
 InsertionOrderPreservingMap<string> ClickhouseScanFunction::AddToProfileInfo(TableFunctionDynamicToStringInput &input) {
 	auto &gstate = input.global_state->Cast<ClickhouseScanGlobalState>();
 	auto &bind_data = input.bind_data->Cast<ClickhouseScanBindData>();
-	auto &create_info = bind_data.table.GetInfo()->Cast<CreateTableInfo>();
+	auto create_info = bind_data.table.GetInfo();
+	auto &create_table_info = create_info->Cast<CreateTableInfo>();
 
-	auto table = create_info.catalog + "." + create_info.schema + "." + create_info.table;
+	auto table = create_table_info.catalog + "." + create_table_info.schema + "." + create_table_info.table;
+	auto sql = gstate.sql;
 
 	InsertionOrderPreservingMap<string> extra_info;
-	extra_info.insert("table", table);
+	extra_info.insert("Table", std::move(table));
+	extra_info.insert("SQL", std::move(sql));
 
 	return extra_info;
 }
