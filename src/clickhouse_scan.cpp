@@ -95,6 +95,7 @@ unique_ptr<GlobalTableFunctionState> ClickhouseScanFunction::InitGlobal(ClientCo
 	select += ".";
 	select += ClickhouseUtils::WriteIdentifier(table.name);
 
+	// TODO remove
 	if (input.filters) {
 		for (auto &e : input.filters->filters) {
 			auto f_str = e.second->DebugToString();
@@ -112,10 +113,10 @@ unique_ptr<GlobalTableFunctionState> ClickhouseScanFunction::InitGlobal(ClientCo
 
 	// Execute query
 	auto &transaction = ClickhouseTransaction::Get(context, table.catalog);
-	auto &client = transaction.GetClient();
-	auto result = make_uniq<ClickhouseResult>(client.Query(select));
+	auto client = transaction.NewClient();
+	auto result = make_uniq<ClickhouseResult>(client->Query(select));
 
-	return make_uniq<ClickhouseScanGlobalState>(std::move(result), max_threads);
+	return make_uniq<ClickhouseScanGlobalState>(std::move(client), std::move(result), max_threads);
 }
 
 //===--------------------------------------------------------------------===//

@@ -16,7 +16,8 @@ ClickhouseSchemaSet::ClickhouseSchemaSet(Catalog &catalog) : ClickhouseCatalogSe
 }
 
 void ClickhouseSchemaSet::LoadEntries(ClickhouseTransaction &transaction) {
-	auto result = transaction.GetClient().Query("SELECT name FROM system.databases");
+	auto client = transaction.NewClient();
+	auto result = client->Query("SELECT name FROM system.databases");
 	while (true) {
 		auto block_opt = result.Next();
 		if (!block_opt.has_value()) {

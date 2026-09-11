@@ -87,7 +87,8 @@ ORDER BY table, position;
 	unique_ptr<CreateTableInfo> info;
 	vector<ClickhouseColumnDefinition> columns;
 
-	auto result = transaction.GetClient().Query(query);
+	auto client = transaction.NewClient();
+	auto result = client->Query(query);
 
 	while (true) {
 		auto block_opt = result.Next();

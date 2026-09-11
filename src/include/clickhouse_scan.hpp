@@ -22,10 +22,12 @@ struct ClickhouseScanBindData : public FunctionData {
 
 // Global state for parallel scanning
 struct ClickhouseScanGlobalState : public GlobalTableFunctionState {
-	explicit ClickhouseScanGlobalState(unique_ptr<ClickhouseResult> result_p, idx_t max_threads)
-	    : result(std::move(result_p)), max_threads(max_threads) {
+	explicit ClickhouseScanGlobalState(unique_ptr<ClickhouseClient> client, unique_ptr<ClickhouseResult> result_p,
+	                                   idx_t max_threads)
+	    : client(std::move(client)), result(std::move(result_p)), max_threads(max_threads) {
 	}
 
+	unique_ptr<ClickhouseClient> client;
 	unique_ptr<ClickhouseResult> result;
 	mutex result_mutex;
 	bool done = false;
