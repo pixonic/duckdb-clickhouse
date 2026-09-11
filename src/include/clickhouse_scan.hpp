@@ -65,6 +65,8 @@ public:
 
 	static bool GetNextBlock(ClientContext &context, ClickhouseScanLocalState &local_state,
 	                         ClickhouseScanGlobalState &global_state);
+
+	static InsertionOrderPreservingMap<string> AddToProfileInfo(TableFunctionDynamicToStringInput &input);
 };
 
 } // namespace duckdb

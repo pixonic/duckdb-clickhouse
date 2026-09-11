@@ -210,6 +210,19 @@ void ClickhouseScanFunction::Scan(ClientContext &context, TableFunctionInput &da
 	lstate.block_offset += output_size;
 }
 
+InsertionOrderPreservingMap<string> ClickhouseScanFunction::AddToProfileInfo(TableFunctionDynamicToStringInput &input) {
+	auto &gstate = input.global_state->Cast<ClickhouseScanGlobalState>();
+	auto &bind_data = input.bind_data->Cast<ClickhouseScanBindData>();
+	auto &create_info = bind_data.table.GetInfo()->Cast<CreateTableInfo>();
+
+	auto table = create_info.catalog + "." + create_info.schema + "." + create_info.table;
+
+	InsertionOrderPreservingMap<string> extra_info;
+	extra_info.insert("table", table);
+
+	return extra_info;
+}
+
 //===--------------------------------------------------------------------===//
 // Table Function
 //===--------------------------------------------------------------------===//
@@ -219,6 +232,7 @@ ClickhouseScanFunction::ClickhouseScanFunction()
                     InitGlobal, InitLocal) {
 	projection_pushdown = true;
 	filter_pushdown = true;
+	dynamic_to_string = AddToProfileInfo;
 }
 
 } // namespace duckdb
