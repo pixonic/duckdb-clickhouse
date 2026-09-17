@@ -105,10 +105,10 @@ unique_ptr<GlobalTableFunctionState> ClickhouseScanFunction::InitGlobal(ClientCo
 
 	// Execute query
 	auto &transaction = ClickhouseTransaction::Get(context, table.catalog);
-	auto &client = transaction.GetClient();
-	auto result = make_uniq<ClickhouseResult>(client.Query(select));
+	auto client = transaction.NewClient();
+	auto result = make_uniq<ClickhouseResult>(client->Query(select));
 
-	return make_uniq<ClickhouseScanGlobalState>(std::move(result), max_threads);
+	return make_uniq<ClickhouseScanGlobalState>(std::move(client), std::move(result), std::move(select), max_threads);
 }
 
 //===--------------------------------------------------------------------===//
@@ -202,6 +202,22 @@ void ClickhouseScanFunction::Scan(ClientContext &context, TableFunctionInput &da
 	lstate.block_offset += output_size;
 }
 
+InsertionOrderPreservingMap<string> ClickhouseScanFunction::AddToProfileInfo(TableFunctionDynamicToStringInput &input) {
+	auto &gstate = input.global_state->Cast<ClickhouseScanGlobalState>();
+	auto &bind_data = input.bind_data->Cast<ClickhouseScanBindData>();
+	auto create_info = bind_data.table.GetInfo();
+	auto &create_table_info = create_info->Cast<CreateTableInfo>();
+
+	auto table = create_table_info.catalog + "." + create_table_info.schema + "." + create_table_info.table;
+	auto sql = gstate.sql;
+
+	InsertionOrderPreservingMap<string> extra_info;
+	extra_info.insert("Table", std::move(table));
+	extra_info.insert("SQL", std::move(sql));
+
+	return extra_info;
+}
+
 //===--------------------------------------------------------------------===//
 // Table Function
 //===--------------------------------------------------------------------===//
@@ -211,6 +227,7 @@ ClickhouseScanFunction::ClickhouseScanFunction()
                     InitGlobal, InitLocal) {
 	projection_pushdown = true;
 	filter_pushdown = true;
+	dynamic_to_string = AddToProfileInfo;
 }
 
 } // namespace duckdb
