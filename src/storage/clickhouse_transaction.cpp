@@ -1,5 +1,7 @@
 #include <thread>
 
+#include "duckdb/common/exception.hpp"
+
 #include "storage/clickhouse_transaction.hpp"
 #include "storage/clickhouse_catalog.hpp"
 
@@ -12,7 +14,11 @@ ClickhouseTransaction::ClickhouseTransaction(Catalog &catalog, TransactionManage
 ClickhouseTransaction::~ClickhouseTransaction() = default;
 
 unique_ptr<ClickhouseClient> ClickhouseTransaction::NewClient() {
-	return make_uniq<ClickhouseClient>(client_options, 10);
+	try {
+		return make_uniq<ClickhouseClient>(client_options, 10);
+	} catch (const std::exception &error) {
+		throw IOException(error.what());
+	}
 }
 
 ClickhouseTransaction &ClickhouseTransaction::Get(ClientContext &context, Catalog &catalog) {
