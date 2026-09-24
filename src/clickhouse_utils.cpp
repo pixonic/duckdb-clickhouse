@@ -129,6 +129,9 @@ clickhouse::ClientOptions ClickhouseUtils::ParseOptions(const string &attach_pat
 		} else if (key == "password") {
 			set_options.insert("password");
 			options.SetPassword(value);
+		} else if (key == "send_retries") {
+			set_options.insert("send_retries");
+			options.SetSendRetries(std::stoul(value));
 		}
 	}
 

@@ -22,15 +22,19 @@ struct ClickhouseScanBindData : public FunctionData {
 
 // Global state for parallel scanning
 struct ClickhouseScanGlobalState : public GlobalTableFunctionState {
-	explicit ClickhouseScanGlobalState(unique_ptr<ClickhouseResult> result_p, idx_t max_threads)
-	    : result(std::move(result_p)), max_threads(max_threads) {
+	explicit ClickhouseScanGlobalState(unique_ptr<ClickhouseClient> client, unique_ptr<ClickhouseResult> result_p,
+	                                   string sql, idx_t max_threads)
+	    : client(std::move(client)), result(std::move(result_p)), sql(std::move(sql)), max_threads(max_threads) {
 	}
 
+	unique_ptr<ClickhouseClient> client;
 	unique_ptr<ClickhouseResult> result;
-	mutex result_mutex;
+	std::string sql;
+	std::mutex result_mutex;
+	idx_t max_threads;
+
 	bool done = false;
 	idx_t batch_index = 0;
-	idx_t max_threads;
 
 	idx_t MaxThreads() const override;
 };
@@ -63,6 +67,8 @@ public:
 
 	static bool GetNextBlock(ClientContext &context, ClickhouseScanLocalState &local_state,
 	                         ClickhouseScanGlobalState &global_state);
+
+	static InsertionOrderPreservingMap<string> AddToProfileInfo(TableFunctionDynamicToStringInput &input);
 };
 
 } // namespace duckdb

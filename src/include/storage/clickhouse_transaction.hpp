@@ -13,12 +13,12 @@ public:
 	ClickhouseTransaction(Catalog &catalog, TransactionManager &manager, ClientContext &context);
 	~ClickhouseTransaction() override;
 
-	ClickhouseClient &GetClient();
+	unique_ptr<ClickhouseClient> NewClient();
 
 	static ClickhouseTransaction &Get(ClientContext &context, Catalog &catalog);
 
 private:
-	ClickhouseClient client;
+	clickhouse::ClientOptions client_options;
 };
 
 } // namespace duckdb
